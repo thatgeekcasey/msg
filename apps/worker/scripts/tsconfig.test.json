@@ -1,0 +1,6 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  // Vitest runs the tests, not Node, so they resolve imports as the rest of the repository does.
+  "compilerOptions": { "lib": ["ES2024"], "types": ["node"] },
+  "include": ["*.test.ts"]
+}

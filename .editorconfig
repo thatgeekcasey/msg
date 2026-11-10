@@ -1,0 +1,18 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Byte-for-byte copies of once-campfire's icons, which end without a newline.
+[{apps/web/src/components/icons/campfire/external,apps/web/public/browsers}/*.svg]
+insert_final_newline = false
+
+# Byte-for-byte copies of third-party agent skills and their licenses (.claude/skills/README.md).
+[.claude/skills/**]
+insert_final_newline = unset
+trim_trailing_whitespace = false

@@ -1,0 +1,23 @@
+{
+  "name": "@ember/perf",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@ember/protocol": "workspace:*",
+    "@types/node": "^26.6.5",
+    "chrome-launcher": "^1.2.1",
+    "lighthouse": "^13.5.0",
+    "puppeteer-core": "^25.9.0",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.149.0"
+  }
+}

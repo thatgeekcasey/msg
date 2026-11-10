@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="fern" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#047857"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#fern)"/>
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="24">
+    <path d="M256 424C252 330 250 230 262 92"/>
+    <path d="M254 366C210 358 172 330 148 286M254 366C298 352 336 320 358 274"/>
+    <path d="M254 296C216 288 186 264 170 230M255 294C292 284 320 260 336 224"/>
+    <path d="M256 228C228 222 206 204 194 178M257 226C284 218 304 200 314 174"/>
+    <path d="M259 166C240 162 226 150 218 132M260 164C278 158 290 146 296 128"/>
+  </g>
+</svg>

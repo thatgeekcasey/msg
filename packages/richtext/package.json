@@ -1,0 +1,24 @@
+{
+  "name": "@ember/richtext",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./dom": "./src/dom.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "parse5": "8.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "jsdom": "^30.1.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

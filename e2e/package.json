@@ -1,0 +1,16 @@
+{
+  "name": "@ember/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@ember/protocol": "workspace:*",
+    "@ember/richtext": "workspace:*",
+    "@playwright/test": "1.64.0",
+    "@types/node": "^26.6.5"
+  }
+}

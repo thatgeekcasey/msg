@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // Node runs these files directly by stripping their types, so stick to syntax it can erase.
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["."],
+  "exclude": ["*.test.ts"]
+}

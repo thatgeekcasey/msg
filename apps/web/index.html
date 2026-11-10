@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover runs the page under the notch
+         (the layout pads with env(safe-area-inset-*)), and resizes-content makes Android shrink the
+         page above the on-screen keyboard instead of covering the composer. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- What lets browsers install Ember as an app. The script below matches the theme color to the
+         page's appearance at once. mobile-web-app-capable is there beside Apple's, since Chrome warns
+         on every page that has only Apple's. -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/webmanifest.json" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/logos/app-icon-48.png" />
+    <link rel="apple-touch-icon" href="/logos/app-icon.png" />
+    <title>Ember</title>
+    <script>
+      // Apply the saved appearance before first paint, and color the browser around the page to match.
+      // src/lib/appearance.ts does the same for each change from then on.
+      (function () {
+        var saved;
+        try { saved = localStorage.getItem("ember:appearance"); } catch (e) {}
+        var mode = saved === "light" || saved === "dark" ? saved : "system";
+        var dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        var html = document.documentElement;
+        html.classList.toggle("dark", dark);
+        html.setAttribute("data-appearance", mode);
+        html.style.colorScheme = dark ? "dark" : "light";
+        document.querySelectorAll('meta[name="theme-color"]').forEach(function (meta) { meta.content = dark ? "#171717" : "#ffffff"; });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,82 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Kept at the root, beside the workspace, so Deploy to Cloudflare finds it: the button renames the
+  // Worker and the bucket here for each deployer.
+  "name": "msg",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // Link previews fetch pages people name: this sends those fetches out over the public Internet even
+  // when they name a host in this Worker's own zone, rather than straight to its origin. nodejs_compat
+  // is for node:crypto's scrypt, which hashes passwords natively (apps/worker/src/passwords.ts).
+  "compatibility_flags": ["global_fetch_strictly_public", "nodejs_compat"],
+  // `enabled` alone turns on logs; traces time each fetch, RPC and Durable Object SQL statement.
+  "observability": { "enabled": true, "traces": { "enabled": true } },
+  // Lets production CPU and heap profiles and exception stacks name our source files.
+  "upload_source_maps": true,
+  // Ember answers at its workers.dev address until an administrator gives it a domain of its own, and goes
+  // back there from one (docs/self-hosting.md#a-custom-domain), so every deploy keeps that address on.
+  // Preview URLs stay off: Cloudflare makes no Version URLs for a Worker with Durable Objects, and the
+  // Previews below can't run Ember.
+  "workers_dev": true,
+  "preview_urls": false,
+  // Workers Builds builds each branch but the production one as a Preview, which `wrangler preview` won't
+  // make without this block. Empty, it gives a Preview none of the bindings below, and preview_urls gives
+  // it no address, so a branch's build only checks that Ember builds.
+  "previews": {},
+
+  // The built React app. Everything but its static files goes to the Worker first, page loads
+  // included, so each answer carries Campfire's headers and old browsers get the upgrade page;
+  // the Worker answers /api/*, /up, the setup and join pages, the web app manifest
+  // (/webmanifest.json) and QR codes (/qr_code/<id>) itself, and fetches the app's page for the
+  // addresses the app shows a page at. Anything else is a static file or Campfire's 404 page.
+  "assets": {
+    "directory": "apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/*", "!/assets/*", "!/browsers/*", "!/globe.svg", "!/logos/*", "!/lucide/*", "!/iconoir/*", "!/screenshots/*", "!/shortcuts/*", "!/ember-icon.png", "!/assistant-avatar.svg", "!/robots.txt"]
+  },
+
+  // One ChatRoom object per room, which owns its sockets, presence and (by default) its messages,
+  // one Workspace object for what the rooms share, one SearchIndex object for every room's messages'
+  // text, and short-lived PasswordHasher and Unfurler objects, which have the CPU time a password's
+  // hash and a link's preview take.
+  "durable_objects": {
+    "bindings": [
+      { "name": "CHAT_ROOM", "class_name": "ChatRoom" },
+      { "name": "WORKSPACE", "class_name": "Workspace" },
+      { "name": "PASSWORD_HASHER", "class_name": "PasswordHasher" },
+      { "name": "UNFURLER", "class_name": "Unfurler" },
+      { "name": "SEARCH_INDEX", "class_name": "SearchIndex" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["Workspace"] },
+    { "tag": "v3", "new_sqlite_classes": ["PasswordHasher"] },
+    { "tag": "v4", "new_sqlite_classes": ["Unfurler"] },
+    { "tag": "v5", "new_sqlite_classes": ["SearchIndex"] }
+  ],
+
+  // The files people upload to rooms. Deploying binds the account's bucket of this name, and creates
+  // it if there's none and the deploy's token may. `wrangler dev` keeps them on this machine.
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "ember","preview_bucket_name": "ember" }],
+
+  // Cloudflare Email Service, which sends Ember's email from the address an administrator gives in
+  // Membership. It delivers once the account is on Workers Paid and has a domain onboarded under Email
+  // Service, Email Sending; until then sending fails, and Membership says why. A RESEND_API_KEY secret
+  // sends with Resend instead. `wrangler dev` sends nothing: it logs each email and saves it to a file.
+  "send_email": [{ "name": "EMAIL" }],
+
+  "vars": {
+    // "do-sqlite" keeps each room's messages in its Durable Object's SQLite storage.
+    // "d1" writes them to the shared D1 database below instead.
+    "STORAGE_BACKEND": "do-sqlite"
+  },
+
+  // The D1 database messages go to when STORAGE_BACKEND is "d1" (docs/self-hosting.md#storage-durable-object-sqlite-or-d1).
+  // Deploy to Cloudflare's form makes one for every copy, as it can't make one only for "d1", and
+  // `pnpm run deploy` binds it only for "d1", making it first if the account has none of this name, and
+  // applying apps/worker/migrations/ to it. `wrangler dev` keeps one on this machine, which
+  // `pnpm --filter @ember/worker d1:migrate:local` migrates.
+  "d1_databases": [{ "binding": "DB", "database_name": "ember", "migrations_dir": "apps/worker/migrations","database_id": "d0795aac-26df-4769-aa10-a25bba92879b" }]
+}

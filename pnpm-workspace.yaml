@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+  - packages/*
+  - e2e
+  - perf
+
+onlyBuiltDependencies:
+  - esbuild
+  - workerd

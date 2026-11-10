@@ -1,0 +1,674 @@
+import { MAX_FILE_SIZE, type LinkPreview, type User } from "@ember/protocol";
+import { OPENGRAPH_EMBED_CONTENT_TYPE, previewContent } from "@ember/richtext/dom";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PeopleContext } from "@/hooks/use-directory";
+import { createRef } from "react";
+import { Composer, RoomDeleted, type ComposerHandle } from "./composer";
+import { editorLoaded } from "./editor";
+
+// The editor here is test-setup.ts's stand-in for Lexxy, a text box whose lines are one paragraph,
+// and every test starts before its code has loaded.
+vi.mock("./editor", async (importOriginal) => ({ ...(await importOriginal<typeof import("./editor")>()), editorLoaded: vi.fn(() => false) }));
+
+async function showComposer({ typing = [] as User[], disabled = false, roomId = "r1", threadId = undefined as string | undefined, direct = false, autoFocus = true } = {}) {
+  const onSend = vi.fn((_body: string, _alsoSend: boolean) => true);
+  const onSendFiles = vi.fn((_files: File[], _alsoSend: boolean) => {});
+  const onTyping = vi.fn();
+  const composer = createRef<ComposerHandle>();
+  const view = render(
+    <Composer
+      ref={composer}
+      roomId={roomId}
+      roomName="general"
+      direct={direct}
+      userId="u1"
+      typing={typing}
+      disabled={disabled}
+      threadId={threadId}
+      onSend={onSend}
+      onSendFiles={onSendFiles}
+      onTyping={onTyping}
+      autoFocus={autoFocus}
+    />,
+  );
+  // The editor loads as the first composer shows.
+  const input = await screen.findByRole("textbox", { name: threadId === undefined ? "Write a message" : "Write a reply" });
+  return { onSend, onSendFiles, onTyping, composer, view, user: userEvent.setup(), input };
+}
+
+function touchScreen() {
+  vi.stubGlobal("matchMedia", (media: string) => ({ matches: media === "(pointer: coarse)", media, addEventListener() {}, removeEventListener() {} }));
+}
+
+const sendButton = () => screen.getByRole("button", { name: "Send Message" });
+const formattingOptions = () => screen.getByRole("button", { name: "Rich text" });
+const attachFiles = () => screen.getByLabelText("Attach a file");
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.mocked(editorLoaded).mockReturnValue(false);
+});
+
+describe("Composer", () => {
+  it("has the text box on top, with Attach files, Formatting options and Send below", async () => {
+    const { input } = await showComposer();
+    expect(input).toHaveAttribute("placeholder", "Message #general");
+    expect(attachFiles().closest("label")).toHaveAttribute("title", "Attach files");
+    expect(formattingOptions()).toHaveAttribute("title", "Formatting options");
+    expect(sendButton()).toHaveAttribute("title", "Send message");
+  });
+
+  it("focuses the text box as the room opens", async () => {
+    const { input } = await showComposer();
+    expect(input).toHaveFocus();
+  });
+
+  it("waits for a tap on touch screens, whose keyboard would cover the room", async () => {
+    touchScreen();
+    const { input } = await showComposer();
+    expect(input).not.toHaveFocus();
+  });
+
+  const room = { roomId: "r1", roomName: "general", userId: "u1", typing: [], disabled: false, onSend: () => true, onSendFiles: () => {}, onTyping: () => {} };
+
+  it("holds the editor back while the room's first messages are on their way, which loading it would delay", async () => {
+    // React has the editor's code from an earlier composer, so it would show at once if it weren't held back.
+    (await showComposer()).view.unmount();
+    const view = render(<Composer {...room} deferEditor />);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByText("Message #general")).toBeInTheDocument();
+
+    view.rerender(<Composer {...room} deferEditor={false} />);
+    expect(await screen.findByRole("textbox", { name: "Write a message" })).toHaveFocus();
+  });
+
+  it("shows the editor at once when it has loaded for a room before", async () => {
+    vi.mocked(editorLoaded).mockReturnValue(true);
+    render(<Composer {...room} deferEditor />);
+    expect(await screen.findByRole("textbox", { name: "Write a message" })).toHaveFocus();
+  });
+
+  it("leaves focus where it's been put while the editor was held back", async () => {
+    (await showComposer()).view.unmount();
+    const page = (deferEditor: boolean) => (
+      <>
+        <button type="button">Elsewhere</button>
+        <Composer {...room} deferEditor={deferEditor} />
+      </>
+    );
+    const view = render(page(true));
+    screen.getByRole("button", { name: "Elsewhere" }).focus();
+
+    view.rerender(page(false));
+    expect(await screen.findByRole("textbox", { name: "Write a message" })).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Elsewhere" })).toHaveFocus();
+  });
+
+  it("takes focus from the last room's composer, which goes as this one opens", async () => {
+    const { view } = await showComposer();
+    view.rerender(<Composer key="r2" {...room} roomId="r2" />);
+    expect(await screen.findByRole("textbox", { name: "Write a message" })).toHaveFocus();
+  });
+});
+
+describe("Group DMs and DM names", () => {
+  it("asks for a message to the others in a DM by name, without the #", async () => {
+    render(<Composer roomId="d1" roomName="Grace and Linus" direct userId="u1" typing={[]} disabled={false} onSend={() => true} onSendFiles={() => {}} onTyping={() => {}} />);
+    expect(await screen.findByRole("textbox", { name: "Write a message" })).toHaveAttribute("placeholder", "Message Grace and Linus");
+  });
+});
+
+describe("Formatting toolbar", () => {
+  it("shows the toolbar while Formatting options is pressed, keeping focus in the text", async () => {
+    const { input, user, view } = await showComposer();
+    const form = view.container.querySelector("form")!;
+    await user.click(formattingOptions());
+    expect(formattingOptions()).toHaveAttribute("aria-pressed", "true");
+    expect(form).toHaveAttribute("data-toolbar");
+    expect(input).toHaveFocus();
+
+    await user.click(formattingOptions());
+    expect(formattingOptions()).toHaveAttribute("aria-pressed", "false");
+    expect(form).not.toHaveAttribute("data-toolbar");
+  });
+});
+
+describe("Send from the keyboard", () => {
+  it("sends what's written on Enter, then empties the box and keeps focus", async () => {
+    const { onSend, input, user } = await showComposer();
+    await user.type(input, "Hello there{Enter}");
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("<p>Hello there</p>", false);
+    expect(input).toHaveValue("");
+    expect(input).toHaveFocus();
+  });
+
+  it("starts a new line on Shift+Enter instead of sending", async () => {
+    const { onSend, input, user } = await showComposer();
+    await user.type(input, "line one{Shift>}{Enter}{/Shift}line two");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("line one\nline two");
+
+    await user.click(sendButton());
+    expect(onSend).toHaveBeenCalledWith("<p>line one<br>line two</p>", false);
+  });
+
+  it("starts a new line on Enter while the toolbar shows, sends on Ctrl+Enter, and then hides the toolbar", async () => {
+    const { onSend, input, user } = await showComposer();
+    await user.click(formattingOptions());
+    await user.type(input, "one{Enter}two");
+    expect(onSend).not.toHaveBeenCalled();
+
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("<p>one<br>two</p>", false);
+    expect(formattingOptions()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("sends only from the Send button on touch screens", async () => {
+    touchScreen();
+    const { onSend, input, user } = await showComposer();
+    await user.type(input, "Hi{Enter}");
+    expect(onSend).not.toHaveBeenCalled();
+
+    await user.click(sendButton());
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(input).toHaveFocus();
+  });
+
+  it("won't send a blank message, though Send stays enabled", async () => {
+    const { onSend, input, user } = await showComposer();
+    expect(sendButton()).toBeEnabled();
+    await user.type(input, "   {Enter}");
+    await user.click(sendButton());
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveFocus();
+  });
+
+  it("keeps what's written when the room won't take it, as when it's too long", async () => {
+    const { onSend, input, user } = await showComposer();
+    onSend.mockReturnValue(false);
+    await user.type(input, "Too much{Enter}");
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("<p>Too much</p>", false);
+    expect(input).toHaveValue("Too much");
+    expect(input).toHaveFocus();
+    expect(localStorage.getItem("composer-draft-u1-r1")).toBe("<p>Too much</p>");
+  });
+
+  it("holds on to the text while the room is disconnected", async () => {
+    const { onSend, input, user } = await showComposer({ disabled: true });
+    await user.type(input, "Are you there?{Enter}");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("Are you there?");
+    expect(sendButton()).toBeDisabled();
+  });
+});
+
+/** A file named `name` of `size` bytes, as the browser gives it, which says it's that size without holding them. */
+function fileOf(name: string, { type = "text/plain", size = 3 } = {}) {
+  const file = new File(["abc"], name, { type });
+  Object.defineProperty(file, "size", { value: size });
+  return file;
+}
+
+/** What's pasted: `files`, and no text. */
+const clipboard = (...files: File[]) => ({ files, getData: () => "" });
+
+/** The files waiting to be sent, by their chips' names. */
+const chips = () => screen.queryAllByRole("button", { name: /^Remove / }).map((chip) => chip.getAttribute("aria-label"));
+
+/** Makes the thumbnails' addresses `blob:<name>`, answering those made and those let go. */
+function thumbnails() {
+  const made: string[] = [];
+  const revoked: string[] = [];
+  vi.spyOn(URL, "createObjectURL").mockImplementation((file) => {
+    made.push(`blob:${(file as File).name}`);
+    return made.at(-1)!;
+  });
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => revoked.push(url));
+  return { made, revoked };
+}
+
+describe("Attach files", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("waits to send the files picked with Attach files, in order of their names, however often they're picked", async () => {
+    const { user } = await showComposer();
+    expect(attachFiles()).toHaveAttribute("type", "file");
+    expect(attachFiles()).toHaveAttribute("multiple");
+    await user.upload(attachFiles(), [fileOf("b.txt"), fileOf("A.pdf"), fileOf("a.txt")]);
+    expect(chips()).toEqual(["Remove A.pdf", "Remove a.txt", "Remove b.txt"]);
+
+    await user.upload(attachFiles(), fileOf("a.txt"));
+    expect(chips()).toEqual(["Remove A.pdf", "Remove a.txt", "Remove a.txt", "Remove b.txt"]);
+    expect(attachFiles()).toHaveValue("");
+  });
+
+  it("shows a picture's thumbnail, and a file icon for anything else, over its name up to its last dot and its extension", async () => {
+    const { made } = thumbnails();
+    const { user } = await showComposer();
+    await user.upload(attachFiles(), [fileOf("moon.jpg", { type: "image/jpeg" }), fileOf("archive.tar.gz", { type: "application/gzip" }), fileOf("README")]);
+
+    const moon = screen.getByRole("button", { name: "Remove moon.jpg" });
+    expect(made).toEqual(["blob:moon.jpg"]);
+    expect(moon.querySelector("img")).toHaveAttribute("src", "blob:moon.jpg");
+    const archive = screen.getByRole("button", { name: "Remove archive.tar.gz" });
+    expect(archive.querySelector("img")).toBeNull();
+    expect(archive.querySelector("svg")).toHaveClass("iconoir-page");
+    // The name runs to an ellipsis, and the extension doesn't.
+    expect(within(archive).getByText("archive.tar.")).toHaveClass("truncate");
+    expect(within(archive).getByText("gz")).toHaveClass("shrink-0");
+    // A name with no dot shows whole.
+    expect(within(screen.getByRole("button", { name: "Remove README" })).getByText("README")).toHaveClass("truncate");
+  });
+
+  it("takes a file back out when its chip is pressed, letting go of its thumbnail", async () => {
+    const { revoked } = thumbnails();
+    const { user, onSendFiles } = await showComposer();
+    await user.upload(attachFiles(), [fileOf("moon.jpg", { type: "image/jpeg" }), fileOf("notes.txt")]);
+    await user.click(screen.getByRole("button", { name: "Remove moon.jpg" }));
+    expect(chips()).toEqual(["Remove notes.txt"]);
+    expect(revoked).toEqual(["blob:moon.jpg"]);
+
+    await user.click(sendButton());
+    expect(onSendFiles).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ name: "notes.txt" })], false);
+  });
+
+  it("sends the files, each as a message of its own, before what's written, and empties the list", async () => {
+    const { onSend, onSendFiles, input, user } = await showComposer();
+    const [b, a] = [fileOf("b.txt"), fileOf("a.txt")];
+    await user.upload(attachFiles(), [b, a]);
+    await user.type(input, "Here they are{Enter}");
+    expect(onSendFiles).toHaveBeenCalledExactlyOnceWith([a, b], false);
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("<p>Here they are</p>", false);
+    expect(onSendFiles.mock.invocationCallOrder[0]).toBeLessThan(onSend.mock.invocationCallOrder[0]!);
+    expect(chips()).toEqual([]);
+    expect(input).toHaveFocus();
+  });
+
+  it("sends the files picked before the editor shows, as its code loads, which what's written waits for", async () => {
+    (await showComposer()).view.unmount();
+    const onSendFiles = vi.fn();
+    const user = userEvent.setup();
+    render(<Composer roomId="r1" roomName="general" userId="u1" typing={[]} disabled={false} deferEditor onSend={() => true} onSendFiles={onSendFiles} onTyping={() => {}} />);
+    await user.upload(attachFiles(), fileOf("a.txt"));
+    await user.click(sendButton());
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(onSendFiles).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ name: "a.txt" })], false);
+    expect(chips()).toEqual([]);
+  });
+
+  it("sends files with nothing written", async () => {
+    const { onSend, onSendFiles, user } = await showComposer();
+    await user.upload(attachFiles(), fileOf("a.txt"));
+    await user.click(sendButton());
+    expect(onSendFiles).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+
+    // Nor anything at all with nothing picked.
+    await user.click(sendButton());
+    expect(onSendFiles).toHaveBeenCalledOnce();
+  });
+
+  it("holds on to the files while the room is disconnected, when files can't be picked", async () => {
+    const { onSendFiles, composer, input, user } = await showComposer({ disabled: true });
+    expect(attachFiles()).toBeDisabled();
+    act(() => composer.current!.addFiles([fileOf("a.txt")]));
+    await user.type(input, "{Enter}");
+    expect(onSendFiles).not.toHaveBeenCalled();
+    expect(chips()).toEqual(["Remove a.txt"]);
+  });
+
+  it("waits to send the files dropped on the composer, the text box included, as a copy", async () => {
+    const { input, view } = await showComposer();
+    const form = view.container.querySelector("form")!;
+    const dataTransfer = { files: [fileOf("dropped.txt")], dropEffect: "none" };
+    // Each is cancelled, so the browser doesn't open the file in place of the page.
+    expect(fireEvent.dragEnter(form, { dataTransfer })).toBe(false);
+    expect(fireEvent.dragOver(form, { dataTransfer })).toBe(false);
+    expect(dataTransfer.dropEffect).toBe("copy");
+    expect(fireEvent.drop(form, { dataTransfer })).toBe(false);
+    expect(chips()).toEqual(["Remove dropped.txt"]);
+
+    expect(fireEvent.drop(input, { dataTransfer: { files: [fileOf("on the text.txt")] } })).toBe(false);
+    expect(chips()).toEqual(["Remove dropped.txt", "Remove on the text.txt"]);
+    expect(input).toHaveValue("");
+  });
+
+  it("waits to send the files dropped on the room's messages, which the room hands over", async () => {
+    const { composer } = await showComposer();
+    act(() => composer.current!.addFiles([fileOf("b.txt"), fileOf("a.txt")]));
+    expect(chips()).toEqual(["Remove a.txt", "Remove b.txt"]);
+  });
+});
+
+describe("Pasting into the composer", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("waits to send pasted files rather than writing them, and leaves pasted text to the editor", async () => {
+    thumbnails();
+    const { input } = await showComposer();
+    expect(fireEvent.paste(input, { clipboardData: clipboard(fileOf("pasted.png", { type: "image/png" })) })).toBe(false);
+    expect(chips()).toEqual(["Remove pasted.png"]);
+    expect(input).toHaveValue("");
+
+    expect(fireEvent.paste(input, { clipboardData: clipboard() })).toBe(true);
+    expect(chips()).toEqual(["Remove pasted.png"]);
+  });
+});
+
+describe("250 MB file limit", () => {
+  const tooLarge = (name: string) => `${name} is too large. Choose a file that’s 250 MB or smaller.`;
+
+  it("leaves out files over 250 MB, saying so under the others until more are picked, dropped or pasted", async () => {
+    const { input, user, view, onSendFiles } = await showComposer();
+    await user.upload(attachFiles(), [
+      fileOf("huge.mov", { size: MAX_FILE_SIZE + 1 }),
+      fileOf("fits.mov", { size: MAX_FILE_SIZE }),
+      fileOf("vast.iso", { size: MAX_FILE_SIZE + 1 }),
+    ]);
+    expect(chips()).toEqual(["Remove fits.mov"]);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(`${tooLarge("huge.mov")} ${tooLarge("vast.iso")}`, { normalizeWhitespace: false });
+    expect(alert).toHaveClass("w-full", "text-negative");
+
+    // It stays through sending and removing files.
+    await user.click(sendButton());
+    expect(onSendFiles).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ name: "fits.mov" })], false);
+    expect(screen.getByRole("alert")).toBe(alert);
+
+    // Picking more says only what's wrong with them.
+    await user.upload(attachFiles(), fileOf("enormous.zip", { size: MAX_FILE_SIZE + 1 }));
+    expect(screen.getByRole("alert")).toHaveTextContent(tooLarge("enormous.zip"), { normalizeWhitespace: false });
+    fireEvent.drop(view.container.querySelector("form")!, { dataTransfer: { files: [fileOf("small.txt")] } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    // Pasting anything clears it, even text.
+    await user.upload(attachFiles(), fileOf("enormous.zip", { size: MAX_FILE_SIZE + 1 }));
+    fireEvent.paste(input, { clipboardData: clipboard() });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("Keep drafts", () => {
+  const draft = (roomId = "r1") => localStorage.getItem(`composer-draft-u1-${roomId}`);
+
+  it("keeps what's written in this browser until it's sent", async () => {
+    const { input, user } = await showComposer();
+    await user.type(input, "Hello");
+    expect(draft()).toBe("<p>Hello</p>");
+
+    await user.keyboard("{Enter}");
+    expect(draft()).toBeNull();
+  });
+
+  it("forgets it once the box is emptied", async () => {
+    const { input, user } = await showComposer();
+    await user.type(input, "Hello");
+    await user.clear(input);
+    expect(draft()).toBeNull();
+  });
+
+  it("brings it back, with the cursor at the end, when the room opens again", async () => {
+    localStorage.setItem("composer-draft-u1-r1", "<p>Where was I</p>");
+    const { input } = await showComposer();
+    expect(input).toHaveValue("Where was I");
+    expect(input).toHaveFocus();
+    expect((input as HTMLTextAreaElement).selectionStart).toBe("Where was I".length);
+  });
+
+  it("keeps each room's apart", async () => {
+    localStorage.setItem("composer-draft-u1-r2", "<p>For the other room</p>");
+    const { input } = await showComposer({ roomId: "r1" });
+    expect(input).toHaveValue("");
+  });
+
+  it("keeps each person's apart, so whoever signs in on this browser next doesn't see it", async () => {
+    localStorage.setItem("composer-draft-u2-r1", "<p>Grace's own</p>");
+    const { input } = await showComposer({ roomId: "r1" });
+    expect(input).toHaveValue("");
+  });
+});
+
+describe("Reply in a thread", () => {
+  const alsoSend = () => screen.getByRole("checkbox", { name: "Also send to #general" });
+
+  it("asks for a reply, with Also send to the room, unticked, before Send", async () => {
+    const { input } = await showComposer({ threadId: "m1" });
+    expect(input).toHaveAttribute("placeholder", "Reply…");
+    expect(alsoSend()).not.toBeChecked();
+    expect(alsoSend().compareDocumentPosition(sendButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("offers to send it as a direct message too in a DM", async () => {
+    await showComposer({ threadId: "m1", direct: true });
+    expect(screen.getByRole("checkbox", { name: "Also send as direct message" })).not.toBeChecked();
+  });
+
+  it("sends a reply to the thread alone, or to the room too while Also send is ticked, which sending unticks", async () => {
+    const { onSend, input, user } = await showComposer({ threadId: "m1" });
+    await user.type(input, "Just here{Enter}");
+    expect(onSend).toHaveBeenLastCalledWith("<p>Just here</p>", false);
+
+    await user.click(alsoSend());
+    await user.type(input, "Everywhere{Enter}");
+    expect(onSend).toHaveBeenLastCalledWith("<p>Everywhere</p>", true);
+    expect(alsoSend()).not.toBeChecked();
+  });
+
+  it("sends files to the room too while Also send is ticked", async () => {
+    const { onSendFiles, user } = await showComposer({ threadId: "m1" });
+    await user.upload(attachFiles(), new File(["hi"], "notes.txt", { type: "text/plain" }));
+    await user.click(alsoSend());
+    await user.click(sendButton());
+    expect(onSendFiles).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ name: "notes.txt" })], true);
+    expect(alsoSend()).not.toBeChecked();
+  });
+
+  it("keeps a thread's draft apart from its room's", async () => {
+    localStorage.setItem("composer-draft-u1-r1", "<p>For the room</p>");
+    const { input, user } = await showComposer({ threadId: "m1" });
+    expect(input).toHaveValue("");
+    await user.type(input, "For the thread");
+    expect(localStorage.getItem("composer-draft-u1-r1/threads/m1")).toBe("<p>For the thread</p>");
+    expect(localStorage.getItem("composer-draft-u1-r1")).toBe("<p>For the room</p>");
+  });
+
+  it("leaves focus be as the room opens with a thread beside it, which takes it", async () => {
+    const { input } = await showComposer({ autoFocus: false });
+    expect(input).not.toHaveFocus();
+  });
+});
+
+describe("Reply with a quote", () => {
+  it("writes a reply in place of what's written, with the cursor at its end, keeping it as the draft", async () => {
+    const composer = createRef<ComposerHandle>();
+    const onTyping = vi.fn();
+    render(
+      <Composer ref={composer} roomId="r1" roomName="general" userId="u1" typing={[]} disabled={false} onSend={() => true} onSendFiles={() => {}} onTyping={onTyping} />,
+    );
+    const input = await screen.findByRole("textbox", { name: "Write a message" });
+    await userEvent.setup().type(input, "Unsent");
+    act(() => (input as HTMLTextAreaElement).blur());
+
+    // The stand-in holds a quote as Action Text's plain text, in quotation marks.
+    act(() => composer.current!.replace("<blockquote><p>Third time's a charm.</p></blockquote><cite>Ada</cite><p><br></p>"));
+    const written = "“Third time's a charm.”\n\nAda";
+    expect(input).toHaveValue(written);
+    expect(input).toHaveFocus();
+    expect((input as HTMLTextAreaElement).selectionStart).toBe(written.length);
+    expect(localStorage.getItem("composer-draft-u1-r1")).toBe("<p>“Third time's a charm.”<br><br>Ada</p>");
+    expect(onTyping).toHaveBeenLastCalledWith(true);
+  });
+
+  it("opens the editor with a reply written while its code loaded, taking focus, even on touch screens", async () => {
+    (await showComposer()).view.unmount();
+    touchScreen();
+    const composer = createRef<ComposerHandle>();
+    const onTyping = vi.fn();
+    const page = (deferEditor: boolean) => (
+      <Composer
+        ref={composer}
+        roomId="r1"
+        roomName="general"
+        userId="u1"
+        typing={[]}
+        disabled={false}
+        deferEditor={deferEditor}
+        onSend={() => true}
+        onSendFiles={() => {}}
+        onTyping={onTyping}
+      />
+    );
+    const view = render(page(true));
+    const quote = "<blockquote><p>Third time's a charm.</p></blockquote><cite>Ada</cite><p><br></p>";
+    act(() => composer.current!.replace(quote));
+    expect(localStorage.getItem("composer-draft-u1-r1")).toBe(quote);
+    expect(onTyping).toHaveBeenLastCalledWith(true);
+
+    view.rerender(page(false));
+    const input = await screen.findByRole("textbox", { name: "Write a message" });
+    expect(input).toHaveValue("“Third time's a charm.”\n\nAda");
+    expect(input).toHaveFocus();
+  });
+});
+
+describe("Link previews while writing", () => {
+  const basecamp: LinkPreview = { title: "Basecamp", url: "https://basecamp.com/", image: "https://basecamp.com/og.png", description: "Calm & organized" };
+
+  /** Answers each ask for a link's preview with what `answer` gives for its address. */
+  function previews(answer: (url: string) => Response | Promise<Response>) {
+    const fetch = vi.fn(async (_path: string, init: RequestInit) => answer(JSON.parse(init.body as string).url));
+    vi.stubGlobal("fetch", fetch);
+    return fetch;
+  }
+
+  /** The link previews the composer shows. */
+  const shownPreviews = (view: ReturnType<typeof render>) => view.container.querySelectorAll(`action-text-attachment[content-type="${OPENGRAPH_EMBED_CONTENT_TYPE}"]`);
+
+  it("adds the preview of a pasted link's page below it, which goes with the message", async () => {
+    const fetch = previews(() => Response.json(basecamp));
+    const { onSend, user } = await showComposer();
+    await user.paste("https://basecamp.com");
+    expect(await screen.findByRole("link", { name: "Basecamp" })).toHaveAttribute("href", "https://basecamp.com/");
+    expect(fetch).toHaveBeenCalledWith("/api/unfurl", expect.objectContaining({ method: "POST", body: JSON.stringify({ url: "https://basecamp.com" }) }));
+
+    await user.keyboard("{Enter}");
+    const sent = new DOMParser().parseFromString(onSend.mock.calls[0]![0], "text/html").body;
+    expect(sent.querySelector("p")!.textContent).toBe("https://basecamp.com");
+    const attachment = sent.querySelector("action-text-attachment")!;
+    expect(attachment.getAttribute("content-type")).toBe(OPENGRAPH_EMBED_CONTENT_TYPE);
+    expect(attachment.getAttribute("content")).toBe(
+      previewContent({ href: "https://basecamp.com/", url: "https://basecamp.com/og.png", filename: "Basecamp", description: "Calm & organized" }),
+    );
+  });
+
+  it("adds nothing for a page without a preview, or a preview that can't be had", async () => {
+    const answers: Record<string, Response> = {
+      "https://example.com/none": new Response(null, { status: 204 }),
+      "https://example.com/limited": Response.json({ error: "Too many link previews. Try again in a minute." }, { status: 429 }),
+      "https://example.com/untitled": Response.json({ ...basecamp, title: "" }),
+    };
+    const fetch = previews((url) => answers[url]!);
+    const { user, view } = await showComposer();
+    for (const url of Object.keys(answers)) await user.paste(url);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    await act(async () => {});
+    expect(shownPreviews(view)).toHaveLength(0);
+  });
+
+  it("forgets the preview of a link once another is pasted, or the composer goes", async () => {
+    let answerFirst!: () => void;
+    const firstAnswered = new Promise<void>((resolve) => (answerFirst = resolve));
+    const fetch = previews(async (url) => {
+      if (url.endsWith("first")) await firstAnswered;
+      return Response.json({ ...basecamp, title: url });
+    });
+    const { user, view } = await showComposer();
+    await user.paste("https://example.com/first");
+    await user.paste("https://example.com/second");
+    expect(await screen.findByRole("link", { name: "https://example.com/second" })).toBeInTheDocument();
+    expect(fetch.mock.calls[0]![1].signal!.aborted).toBe(true);
+    await act(async () => answerFirst());
+    expect(shownPreviews(view)).toHaveLength(1);
+
+    await user.paste("https://example.com/third");
+    view.unmount();
+    expect(fetch.mock.calls[2]![1].signal!.aborted).toBe(true);
+  });
+});
+
+describe("Typing indicator", () => {
+  it("reports typing while there's text, and stops when it's cleared, but not when the box loses focus", async () => {
+    const { onTyping, input, user } = await showComposer();
+    await user.type(input, "Hi");
+    expect(onTyping).toHaveBeenLastCalledWith(true);
+    await user.clear(input);
+    expect(onTyping).toHaveBeenLastCalledWith(false);
+    await user.type(input, "Hi");
+    onTyping.mockClear();
+    await user.tab();
+    expect(onTyping).not.toHaveBeenCalled();
+  });
+
+  it("leaves it to the message, whose arrival stops the others showing you typing", async () => {
+    const { onTyping, input, user } = await showComposer();
+    await user.type(input, "Hi{Enter}");
+    expect(onTyping).not.toHaveBeenCalledWith(false);
+  });
+
+  const typist = (name: string, i: number): User => ({ id: `u${i}`, name });
+
+  it.each([
+    [["Ada"], "Ada"],
+    [["Grace", "Ada"], "Ada, Grace"],
+    [["Linus", "Grace", "Ada", "Ken"], "Ada, Grace, Ken, Linus"],
+    // Sorted by code unit, as JavaScript sorts strings, so capitals come first.
+    [["ada", "Bob"], "Bob, ada"],
+  ])("names whoever is typing after a spinner, sorted and comma-separated: %j", async (names, line) => {
+    const { view } = await showComposer({ typing: names.map(typist) });
+    const indicator = view.container.querySelector(".spinner")!;
+    expect(indicator).toHaveTextContent(line, { normalizeWhitespace: false });
+    expect(indicator).not.toHaveClass("hidden");
+    expect(indicator.parentElement).not.toHaveClass("opacity-0");
+    expect(indicator.closest("[aria-live]")).toBeNull();
+  });
+
+  it("names them as the people directory lists them now, which follows a rename since the room heard them", async () => {
+    const grace = { id: "u2", name: "Grace Hopper", bio: null, role: "member", status: "active", avatarUrl: "/users/u2/avatar" } as const;
+    const { container } = render(
+      <PeopleContext value={new Map([[grace.id, grace]])}>
+        <Composer
+          roomId="r1"
+          roomName="general"
+          userId="u1"
+          typing={[typist("Linus", 1), typist("Grace", 2)]}
+          disabled={false}
+          onSend={vi.fn(() => true)}
+          onSendFiles={vi.fn()}
+          onTyping={vi.fn()}
+        />
+      </PeopleContext>,
+    );
+    await screen.findByRole("textbox", { name: "Write a message" });
+    expect(container.querySelector(".spinner")).toHaveTextContent("Grace Hopper, Linus", { normalizeWhitespace: false });
+  });
+
+  it("shows nothing while nobody is typing, and fades in when someone starts", async () => {
+    const { view } = await showComposer();
+    const indicator = view.container.querySelector(".spinner")!;
+    expect(indicator).toHaveTextContent("");
+    expect(indicator).toHaveClass("hidden");
+    expect(indicator.parentElement).toHaveClass("opacity-0", "transition-opacity", "duration-300");
+  });
+});
+
+describe("Only members see a room", () => {
+  it("says a room that's gone was deleted, in red, shaking once where motion is welcome", () => {
+    render(<RoomDeleted />);
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("This room was deleted.");
+    expect(notice).toHaveClass("text-negative", "border-negative", "motion-safe:animate-shake");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+});

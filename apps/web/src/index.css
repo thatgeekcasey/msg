@@ -1,0 +1,685 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Lucide's icon names (zoom-in, table, italic...) aren't class names, so don't make utilities of them. */
+@source not "./components/icons/lucide";
+
+/* Dark mode follows the `dark` class on <html>, set from the Light / Dark / System picker. */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Ember's palette, expressed as shadcn/ui tokens so the stock components match.
+ *   canvas  -> --background    surface -> --surface    hover -> --accent / --hover
+ *   border  -> --border        muted   -> --muted-foreground    ink -> --foreground
+ */
+:root {
+  --radius: 0.625rem;
+  --background: #ffffff;
+  --foreground: #171717;
+  --surface: #fafafa;
+  --hover: #f2f2f2;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+  --primary: #171717;
+  --primary-foreground: #fafafa;
+  --secondary: #f2f2f2;
+  --secondary-foreground: #171717;
+  --muted: #f2f2f2;
+  --muted-foreground: #737373;
+  --accent: #f2f2f2;
+  --accent-foreground: #171717;
+  --destructive: #b91c1c;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #737373;
+  /* The ring round a field with a button or icon in it, while it has focus, after Campfire's --color-selected-dark. */
+  --selected-dark: #a3a3a3;
+  --message-ink: #1d1c1d;
+  --message-muted: #616061;
+  --message-border: #dedede;
+  --message-divider: #dddddd;
+  --message-hover: #f8f8f8;
+  --mention: oklch(70% 0.2 44);
+  /* A notice's green and an alert's red, after Campfire's --color-positive and --color-negative. */
+  --positive: oklch(65.59% 0.234 142.49);
+  --negative: oklch(51% 0.2 31);
+  /* A `.btn--negative`, such as Delete on a room's settings: the same red in dark mode. */
+  --negative-button: #b91c1c;
+  /*
+   * Why a sign-in was refused: dark red on the negative red at 8% over the canvas, bordered by it at 25%
+   * over the border, mixed in whichever mode is on.
+   */
+  --auth-error: #b91c1c;
+  --auth-error-background: color-mix(in srgb, var(--negative) 8%, var(--background));
+  --auth-error-border: color-mix(in srgb, var(--negative) 25%, var(--border));
+  /* A bot card's `warning` bar: Slack's own amber, since Campfire's --lch-orange is too near the negative red to tell apart. */
+  --warning: #daa038;
+  /* Campfire's lightbox.css: the image viewer lays --lch-white at 66% over the blurred page. */
+  --lightbox: oklch(100% 0 0 / 0.66);
+  /* Links in a message: Campfire's --color-link. */
+  --link: oklch(54% 0.23 255);
+  /* A rule in a message is the browser's own gray, in both modes. */
+  --message-rule: #808080;
+  /* Campfire's code.css: GitHub's highlight.js theme, following the appearance. */
+  --code-keyword: oklch(58.79% 0.193 20.47);
+  --code-entity: oklch(50.15% 0.188 294.99);
+  --code-constant: oklch(49.49% 0.18 257.6);
+  --code-string: oklch(31.08% 0.101 255.87);
+  --code-variable: oklch(64.82% 0.18 45.87);
+  --code-comment: oklch(55.14% 0.019 250.98);
+  --code-entity-tag: oklch(54.64% 0.144 147.32);
+  --code-heading: oklch(49.49% 0.18 257.6);
+  --code-list: oklch(48.46% 0.093 90.48);
+  --code-inserted: oklch(54.64% 0.144 147.32);
+  --code-deleted: oklch(49.59% 0.183 24.19);
+  /* What dialogs lay over the page, and their shadows, in both modes. */
+  --dialog-backdrop: #0005;
+  --dialog-shadow: #0003;
+  --dialog-shadow-faint: #0001;
+  /* And what's laid over the page behind the conversations drawer. */
+  --drawer-backdrop: #0006;
+  /* The shadow the translation buttons' menus cast, in both modes. */
+  --menu-shadow: #00000012;
+  /* The shadow under a starred room's row while it's dragged, in both modes. */
+  --drag-shadow: #0002;
+  /* The shadow under the bell's confirmation in a room's header, in both modes. */
+  --tooltip-shadow: #0002;
+  /* Campfire's `.dialog::backdrop` (base.css), a sunset at 75%, behind the Notification setup dialog, in both modes. */
+  --setup-backdrop: linear-gradient(45deg, #fff500, #ff9f00, #f00, #ec0061);
+  /* Campfire's scrollbar thumb (base.css), the gray a Mac's are, in both modes. */
+  --scrollbar: #c1c1c1;
+  /* What a search matched, marked in its results: a pale yellow, as Slack marks them. */
+  --search-match: #fbe7a1;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #171717;
+  --foreground: #f5f5f5;
+  --surface: #1c1c1c;
+  --hover: #282828;
+  --card: #1c1c1c;
+  --card-foreground: #f5f5f5;
+  --popover: #1c1c1c;
+  --popover-foreground: #f5f5f5;
+  --primary: #f5f5f5;
+  --primary-foreground: #171717;
+  --secondary: #282828;
+  --secondary-foreground: #f5f5f5;
+  --muted: #282828;
+  --muted-foreground: #a3a3a3;
+  --accent: #282828;
+  --accent-foreground: #f5f5f5;
+  --destructive: #ef4444;
+  --border: #343434;
+  --input: #343434;
+  --ring: #a3a3a3;
+  --selected-dark: #737373;
+  --message-ink: #f5f5f5;
+  --message-muted: #a3a3a3;
+  --message-border: #343434;
+  --message-divider: #343434;
+  --message-hover: #202020;
+  --positive: oklch(75% 0.21 141.89);
+  --negative: oklch(73.8% 0.184 29.18);
+  --auth-error: #fca5a5;
+  --warning: oklch(80% 0.14 78);
+  --lightbox: oklch(0% 0 0 / 0.66);
+  --link: oklch(72.25% 0.16 248);
+  --code-keyword: oklch(73.45% 0.16260514269909043 25.78369140372489);
+  --code-entity: oklch(80.05% 0.127 305.86);
+  --code-constant: oklch(78.57% 0.115 246.66);
+  --code-string: oklch(78.57% 0.115 246.66);
+  --code-variable: oklch(79.91% 0.141 60.1);
+  --code-comment: oklch(66.25% 0.018 250.92);
+  --code-entity-tag: oklch(84.16% 0.164 145.75);
+  --code-heading: oklch(56.86% 0.202 259.67);
+  --code-list: oklch(85.74% 0.133 89.95);
+  --code-inserted: oklch(90.72% 0.112 146.34);
+  --code-deleted: oklch(92.23% 0.03967766015913856 27.493308249746637);
+  --search-match: #6b5313;
+  color-scheme: dark;
+}
+
+/*
+ * The drawer layout is at 900px wide and below, so `md` starts at 901px here, and `max-md` means 900px
+ * and below.
+ */
+@theme {
+  --breakpoint-md: 56.3125rem;
+
+  /* Campfire's animation.css: a refused form shakes, a message that can't be shown wiggles, and a flash fades away. */
+  --animate-shake: shake 400ms both;
+  --animate-wiggle: wiggle 400ms both;
+  --animate-flash: appear-then-fade 3s 300ms both;
+  /* Without motion, a flash shows at once and stays until the fade would have ended, when it goes. */
+  --animate-flash-still: stay 3.3s;
+  /* And its `.btn--success` (buttons.css): a button that copied something pulses as its icon floats away. */
+  --animate-success: success 1s ease-out;
+  --animate-zoom-fade: zoom-fade 300ms ease-out;
+  /* And its `.boost--deleting` (boosts.css): a reaction you delete shrinks away. */
+  --animate-scale-fade-out: scale-fade-out 0.2s both;
+
+  @keyframes shake {
+    0% {
+      transform: translateX(-2rem);
+    }
+    25% {
+      transform: translateX(2rem);
+    }
+    50% {
+      transform: translateX(-1rem);
+    }
+    75% {
+      transform: translateX(1rem);
+    }
+  }
+
+  @keyframes wiggle {
+    20%,
+    60% {
+      transform: rotate(3deg);
+    }
+    40%,
+    80% {
+      transform: rotate(-3deg);
+    }
+  }
+
+  @keyframes appear-then-fade {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    5%,
+    60% {
+      opacity: 1;
+    }
+  }
+
+  /* Changes nothing: it's there for when it ends. */
+  @keyframes stay {
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* Campfire's --color-border-darker, which is the muted ink here. */
+  @keyframes success {
+    0% {
+      background-color: var(--muted-foreground);
+      scale: 0.8;
+    }
+    20% {
+      background-color: var(--muted-foreground);
+      scale: 1;
+    }
+  }
+
+  @keyframes zoom-fade {
+    100% {
+      transform: translateY(-2em);
+      opacity: 0;
+    }
+  }
+
+  @keyframes scale-fade-out {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(0);
+      opacity: 0;
+    }
+  }
+}
+
+/*
+ * Campfire's `.spinner` (spinner.css, animation.css's `submitting`): three dots that bounce in turn,
+ * drawn in the text's color before the element's own content, which leaves 1.5em for them. Without
+ * motion they hold still in a row, where Campfire's reset leaves them stacked as one dot.
+ */
+@utility spinner {
+  position: relative;
+
+  &::before {
+    --mask: no-repeat radial-gradient(#000 68%, #0000 71%);
+    --dot-size: 1.25em;
+
+    mask: var(--mask), var(--mask), var(--mask);
+    mask-size: 28% 45%;
+    mask-position: 0% 0%, 50% 0%, 100% 0%;
+    animation: submitting 1.3s infinite linear;
+    aspect-ratio: 8/5;
+    background: currentColor;
+    content: "";
+    inline-size: var(--dot-size);
+    inset: 50% 0.25em;
+    margin-block: calc((var(--dot-size) / 3) * -1);
+    margin-inline: calc((var(--dot-size) / 2) * -1);
+    position: absolute;
+
+    @media (prefers-reduced-motion: reduce) {
+      animation: none;
+    }
+  }
+}
+
+@keyframes submitting {
+  0% {
+    mask-position: 0% 0%, 50% 0%, 100% 0%;
+  }
+  12.5% {
+    mask-position: 0% 50%, 50% 0%, 100% 0%;
+  }
+  25% {
+    mask-position: 0% 100%, 50% 50%, 100% 0%;
+  }
+  37.5% {
+    mask-position: 0% 100%, 50% 100%, 100% 50%;
+  }
+  50% {
+    mask-position: 0% 100%, 50% 100%, 100% 100%;
+  }
+  62.5% {
+    mask-position: 0% 50%, 50% 100%, 100% 100%;
+  }
+  75% {
+    mask-position: 0% 0%, 50% 50%, 100% 100%;
+  }
+  87.5% {
+    mask-position: 0% 0%, 50% 0%, 100% 50%;
+  }
+  100% {
+    mask-position: 0% 0%, 50% 0%, 100% 0%;
+  }
+}
+
+/*
+ * Narrow-screen rules, `@media (max-width: …)`, which apply at the width they name, where Tailwind's
+ * `max-[…]` stops short of it: a 7-inch tablet 600px wide gets the 600px rules. They come before
+ * `touch:` and `short:`, which win over them where both set something.
+ */
+@custom-variant upto-600px (@media (width <= 37.5rem));
+@custom-variant upto-500px (@media (width <= 31.25rem));
+@custom-variant upto-480px (@media (width <= 30rem));
+@custom-variant upto-380px (@media (width <= 23.75rem));
+
+/*
+ * `touch:` sizes controls for fingers: 44px targets and 16px text fields, so iOS doesn't zoom in on
+ * focus, at 900px and below and for any coarse pointer, so a tablet or a phone in landscape (wider than
+ * 900px) isn't left with mouse-sized controls.
+ */
+@custom-variant touch {
+  @media (width < 56.3125rem) {
+    @slot;
+  }
+  @media (pointer: coarse) {
+    @slot;
+  }
+}
+
+/* `narrow:` is the band from 901 to 1100px wide, where the sidebar narrows to 230px and the page's sides tighten. */
+@custom-variant narrow (@media (56.3125rem <= width <= 68.75rem));
+
+/* `short:` tightens dialogs on screens under 500px tall, such as a phone in landscape. */
+@custom-variant short (@media (height < 31.25rem));
+
+/* Campfire's `.hide-in-ios-pwa` (utilities.css): Ember added to an iPhone's or iPad's home screen. */
+@custom-variant ios-pwa {
+  @media (display-mode: standalone) {
+    @supports (-webkit-touch-callout: none) {
+      @slot;
+    }
+  }
+}
+
+/* The sidebar's width, which `narrow:` takes from 280px to 230px; the drawer keeps 280px. */
+:root {
+  --sidebar-width: 280px;
+  @variant narrow {
+    --sidebar-width: 230px;
+  }
+}
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-hover: var(--hover);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-selected-dark: var(--selected-dark);
+  --color-message-ink: var(--message-ink);
+  --color-message-muted: var(--message-muted);
+  --color-message-border: var(--message-border);
+  --color-message-divider: var(--message-divider);
+  --color-message-hover: var(--message-hover);
+  --color-mention: var(--mention);
+  --color-link: var(--link);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-negative-button: var(--negative-button);
+  --color-auth-error: var(--auth-error);
+  --color-auth-error-background: var(--auth-error-background);
+  --color-auth-error-border: var(--auth-error-border);
+  --color-warning: var(--warning);
+  --color-lightbox: var(--lightbox);
+  --color-dialog-backdrop: var(--dialog-backdrop);
+  --color-dialog-shadow: var(--dialog-shadow);
+  --color-dialog-shadow-faint: var(--dialog-shadow-faint);
+  --color-drawer-backdrop: var(--drawer-backdrop);
+  --color-menu-shadow: var(--menu-shadow);
+  --color-drag-shadow: var(--drag-shadow);
+  --color-tooltip-shadow: var(--tooltip-shadow);
+  --color-search-match: var(--search-match);
+  /* Workspace geometry: 80px rail, 280px sidebar (230px `narrow:`), 60px header. */
+  --spacing-rail: 80px;
+  --spacing-sidebar: var(--sidebar-width);
+  --spacing-header: 60px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+  body {
+    @apply bg-surface text-foreground font-sans antialiased;
+    font-size: 14px;
+    line-height: 1.5;
+    min-width: 20rem;
+  }
+  :where(h1, h2, h3) {
+    letter-spacing: -0.025em;
+  }
+  /* Every control focuses with a 2px ink outline. */
+  :where(a, button, summary, input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--foreground);
+    outline-offset: 3px;
+  }
+  /* Campfire's thinner scrollbars, which it gives Chrome (base.css). */
+  @media screen and (-webkit-min-device-pixel-ratio: 0) and (min-resolution: 0.001dpcm) {
+    * {
+      scrollbar-color: var(--scrollbar) transparent;
+      scrollbar-width: thin;
+    }
+  }
+}
+
+/*
+ * A message's text (MessageBody): Lexxy's lexxy-content.css, under Campfire's actiontext.css, base.css
+ * and code.css, as a browser computes that cascade. Tailwind's preflight resets the browser's own styles
+ * for headings, lists, rules and the like, so those are here too.
+ */
+@layer components {
+  .message-content {
+    color: var(--foreground);
+    font-size: 15px;
+    line-height: 22px;
+    word-break: break-word;
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+      font-weight: bold;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-wrap: balance;
+    }
+    /* Campfire makes h1 smaller than Lexxy's h2. */
+    h1 {
+      font-size: 1.4rem;
+    }
+    h2 {
+      font-size: 1.5rem;
+    }
+    h3 {
+      font-size: 1.25rem;
+    }
+    h4 {
+      font-size: 1rem;
+    }
+    h5 {
+      font-size: 0.875rem;
+    }
+    h6 {
+      font-size: 0.75rem;
+    }
+    h1,
+    h2,
+    h3 {
+      overflow-wrap: anywhere;
+    }
+
+    p,
+    ul,
+    ol,
+    dl,
+    blockquote {
+      overflow-wrap: break-word;
+      text-wrap: pretty;
+    }
+    p:empty {
+      display: none;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: underline;
+      @media (any-hover: hover) {
+        &:not(:active):hover {
+          filter: brightness(1.3);
+        }
+      }
+    }
+
+    /* Campfire hides Lexxy's highlight colors. */
+    mark {
+      background-color: transparent;
+      color: inherit;
+    }
+
+    /* But search results mark what the search matched. */
+    mark[data-search-match] {
+      background-color: var(--search-match);
+      border-radius: 2px;
+    }
+
+    code {
+      background-color: var(--background);
+      border: 1px solid var(--border);
+      border-radius: 0.5ch;
+      font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.9em;
+      font-weight: 500;
+      padding: 0.25ch 0.5ch;
+    }
+
+    pre {
+      background-color: var(--background);
+      border: 1px solid var(--border);
+      border-radius: 0.5em;
+      color: var(--foreground);
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monaco, monospace;
+      font-size: 0.8rem;
+      hyphens: none;
+      overflow-wrap: break-word;
+      overflow-x: auto;
+      padding: 1em;
+      tab-size: 2;
+      white-space: pre-wrap;
+    }
+    pre[data-language] {
+      border-radius: 0.5ch;
+    }
+    .code-block pre {
+      @apply min-h-11 pr-10 touch:min-h-14 touch:pr-14;
+    }
+
+    blockquote {
+      border-inline-start: 0.5ch solid var(--muted-foreground);
+      margin-inline: 1ch;
+      padding-block: 0.5lh;
+      padding-inline: 1.5ch 2ch;
+    }
+    cite {
+      display: block;
+      font-size: 0.8rem;
+      font-style: normal;
+      font-weight: 600;
+      margin-inline-start: 1.5ch;
+      &::before {
+        color: var(--muted-foreground);
+        content: "— ";
+      }
+    }
+
+    ul {
+      list-style-type: disc;
+    }
+    ol {
+      list-style-type: decimal;
+    }
+    /* Campfire's margin is on the left; here it follows the text's direction. */
+    li {
+      margin-inline-start: 2ch;
+    }
+    li[data-list] {
+      list-style-type: none;
+    }
+    dd {
+      margin-inline-start: 40px;
+    }
+
+    hr {
+      border: 0;
+      border-block-end: 1px solid var(--message-rule);
+      inline-size: 20%;
+    }
+
+    table {
+      border-collapse: collapse;
+      border-spacing: 0;
+      inline-size: calc(100% - 0.5ch);
+      margin: 0.25ch;
+    }
+    th,
+    td {
+      border: 1px solid var(--muted-foreground);
+      max-width: 50ch;
+      min-width: 5ch;
+      padding: 1ch;
+      text-align: start;
+      word-break: normal;
+      & :is(code, pre) {
+        hyphens: auto;
+        white-space: pre-wrap;
+      }
+    }
+    /* Lexxy's header cells, in a gray that turns dark in dark mode. */
+    th {
+      background-color: var(--muted);
+      font-weight: bold;
+    }
+
+    .hljs-doctag,
+    .hljs-keyword,
+    .hljs-meta .hljs-keyword,
+    .hljs-template-tag,
+    .hljs-template-variable,
+    .hljs-type,
+    .hljs-variable.language_ {
+      color: var(--code-keyword);
+    }
+    .hljs-title,
+    .hljs-title.class_,
+    .hljs-title.class_.inherited__,
+    .hljs-title.function_ {
+      color: var(--code-entity);
+    }
+    .hljs-attr,
+    .hljs-attribute,
+    .hljs-literal,
+    .hljs-meta,
+    .hljs-number,
+    .hljs-operator,
+    .hljs-variable,
+    .hljs-selector-attr,
+    .hljs-selector-class,
+    .hljs-selector-id {
+      color: var(--code-constant);
+    }
+    .hljs-regexp,
+    .hljs-string,
+    .hljs-meta .hljs-string {
+      color: var(--code-string);
+    }
+    .hljs-built_in,
+    .hljs-symbol {
+      color: var(--code-variable);
+    }
+    .hljs-comment,
+    .hljs-code,
+    .hljs-formula {
+      color: var(--code-comment);
+    }
+    .hljs-name,
+    .hljs-quote,
+    .hljs-selector-tag,
+    .hljs-selector-pseudo {
+      color: var(--code-entity-tag);
+    }
+    .hljs-section {
+      color: var(--code-heading);
+      font-weight: bold;
+    }
+    .hljs-bullet {
+      color: var(--code-list);
+    }
+    .hljs-emphasis {
+      font-style: italic;
+    }
+    .hljs-strong {
+      font-weight: bold;
+    }
+    .hljs-addition {
+      background-color: var(--border);
+      color: var(--code-inserted);
+    }
+    .hljs-deletion {
+      background-color: var(--border);
+      color: var(--code-deleted);
+    }
+  }
+}

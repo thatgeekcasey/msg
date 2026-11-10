@@ -1,0 +1,998 @@
+{
+  "environment": {
+    "date": "2026-10-12T21:07:46.971Z",
+    "commit": "5a36f41",
+    "profile": "full",
+    "target": "local wrangler dev, state in /dev/shm",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "memoryGb": 16,
+    "os": "Linux 6.18.44-fc-v114",
+    "node": "v22.22.0",
+    "wrangler": "4.149.0",
+    "workerd": "1.20261006.1",
+    "lighthouse": "13.5.0"
+  },
+  "backend": {
+    "do-sqlite": {
+      "latency": {
+        "messages": 300,
+        "rate": 20,
+        "ack": {
+          "count": 300,
+          "mean": 3.07,
+          "p50": 2.83,
+          "p90": 3.92,
+          "p95": 4.8,
+          "p99": 6.41,
+          "max": 13.47
+        },
+        "delivery": {
+          "count": 300,
+          "mean": 3.4,
+          "p50": 3.09,
+          "p90": 4.49,
+          "p95": 5.21,
+          "p99": 7.12,
+          "max": 13.65
+        },
+        "lost": 0,
+        "window": {
+          "ms": 14956,
+          "serverCpuPercent": 9,
+          "busiestProcessCpuPercent": 5,
+          "serverRssMb": 547,
+          "clientLagP99Ms": 1
+        }
+      },
+      "throughput": {
+        "messages": 3000,
+        "senders": 4,
+        "inFlight": 8,
+        "messagesPerSecond": 1359.3,
+        "ack": {
+          "count": 3000,
+          "mean": 22.94,
+          "p50": 13.1,
+          "p90": 43.55,
+          "p95": 58.75,
+          "p99": 227.78,
+          "max": 262.78
+        },
+        "outOfOrder": 0,
+        "errors": 0,
+        "timedOut": false,
+        "window": {
+          "ms": 2207,
+          "serverCpuPercent": 117,
+          "busiestProcessCpuPercent": 96,
+          "serverRssMb": 642,
+          "clientLagP99Ms": 2
+        }
+      },
+      "fanout": [
+        {
+          "members": 10,
+          "messages": 100,
+          "rate": 10,
+          "delivery": {
+            "count": 1000,
+            "mean": 4.43,
+            "p50": 4,
+            "p90": 5.88,
+            "p95": 7.18,
+            "p99": 7.81,
+            "max": 9.94
+          },
+          "completion": {
+            "count": 100,
+            "mean": 4.49,
+            "p50": 4.06,
+            "p90": 5.88,
+            "p95": 7.18,
+            "p99": 7.81,
+            "max": 9.94
+          },
+          "deliveriesPerSecond": 100.9,
+          "lost": 0,
+          "outOfOrder": 0,
+          "window": {
+            "ms": 9906,
+            "serverCpuPercent": 6,
+            "busiestProcessCpuPercent": 3,
+            "serverRssMb": 584,
+            "clientLagP99Ms": 1
+          }
+        },
+        {
+          "members": 100,
+          "messages": 100,
+          "rate": 10,
+          "delivery": {
+            "count": 10000,
+            "mean": 19.13,
+            "p50": 18.74,
+            "p90": 22.87,
+            "p95": 24.59,
+            "p99": 28.21,
+            "max": 55.28
+          },
+          "completion": {
+            "count": 100,
+            "mean": 20.36,
+            "p50": 19.69,
+            "p90": 23.91,
+            "p95": 25.31,
+            "p99": 28.21,
+            "max": 55.28
+          },
+          "deliveriesPerSecond": 1008.1,
+          "lost": 0,
+          "outOfOrder": 0,
+          "window": {
+            "ms": 9920,
+            "serverCpuPercent": 18,
+            "busiestProcessCpuPercent": 12,
+            "serverRssMb": 725,
+            "clientLagP99Ms": 2
+          }
+        },
+        {
+          "members": 250,
+          "messages": 100,
+          "rate": 10,
+          "delivery": {
+            "count": 25000,
+            "mean": 48.99,
+            "p50": 47.15,
+            "p90": 57.49,
+            "p95": 64.01,
+            "p99": 86.58,
+            "max": 152.32
+          },
+          "completion": {
+            "count": 100,
+            "mean": 52.74,
+            "p50": 50.43,
+            "p90": 59.98,
+            "p95": 65.43,
+            "p99": 86.58,
+            "max": 152.32
+          },
+          "deliveriesPerSecond": 2509.8,
+          "lost": 0,
+          "outOfOrder": 0,
+          "window": {
+            "ms": 9961,
+            "serverCpuPercent": 44,
+            "busiestProcessCpuPercent": 28,
+            "serverRssMb": 942,
+            "clientLagP99Ms": 8
+          }
+        },
+        {
+          "members": 500,
+          "messages": 100,
+          "rate": 10,
+          "delivery": {
+            "count": 50000,
+            "mean": 92.5,
+            "p50": 90.2,
+            "p90": 108.77,
+            "p95": 118,
+            "p99": 169.73,
+            "max": 196.77
+          },
+          "completion": {
+            "count": 100,
+            "mean": 101.5,
+            "p50": 96.36,
+            "p90": 118.09,
+            "p95": 121.71,
+            "p99": 194.8,
+            "max": 196.77
+          },
+          "deliveriesPerSecond": 5006.5,
+          "lost": 0,
+          "outOfOrder": 0,
+          "window": {
+            "ms": 9987,
+            "serverCpuPercent": 80,
+            "busiestProcessCpuPercent": 55,
+            "serverRssMb": 1274,
+            "clientLagP99Ms": 13
+          }
+        }
+      ],
+      "connections": {
+        "sizes": [
+          100,
+          200,
+          300,
+          400,
+          500,
+          750,
+          1000
+        ],
+        "concurrency": 8,
+        "maxConnectP95Ms": 2000,
+        "steps": [
+          {
+            "members": 100,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 48.51,
+              "p50": 46.66,
+              "p90": 74.39,
+              "p95": 83.37,
+              "p99": 85.48,
+              "max": 94.53
+            },
+            "joinsPerSecond": 70.4,
+            "presenceKbPerJoin": 154,
+            "window": {
+              "ms": 1420,
+              "serverCpuPercent": 106,
+              "busiestProcessCpuPercent": 70,
+              "serverRssMb": 708,
+              "clientLagP99Ms": 4
+            }
+          },
+          {
+            "members": 200,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 126.6,
+              "p50": 122.29,
+              "p90": 175.65,
+              "p95": 192.31,
+              "p99": 210.59,
+              "max": 210.85
+            },
+            "joinsPerSecond": 32.2,
+            "presenceKbPerJoin": 1089,
+            "window": {
+              "ms": 3105,
+              "serverCpuPercent": 114,
+              "busiestProcessCpuPercent": 85,
+              "serverRssMb": 868,
+              "clientLagP99Ms": 8
+            }
+          },
+          {
+            "members": 300,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 239.73,
+              "p50": 245.57,
+              "p90": 314.01,
+              "p95": 371.53,
+              "p99": 414.13,
+              "max": 428.73
+            },
+            "joinsPerSecond": 18.2,
+            "presenceKbPerJoin": 2982,
+            "window": {
+              "ms": 5506,
+              "serverCpuPercent": 118,
+              "busiestProcessCpuPercent": 92,
+              "serverRssMb": 1021,
+              "clientLagP99Ms": 3
+            }
+          },
+          {
+            "members": 400,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 444.04,
+              "p50": 496.2,
+              "p90": 627.37,
+              "p95": 732.66,
+              "p99": 735.91,
+              "max": 736.32
+            },
+            "joinsPerSecond": 11.4,
+            "presenceKbPerJoin": 5830,
+            "window": {
+              "ms": 8743,
+              "serverCpuPercent": 115,
+              "busiestProcessCpuPercent": 92,
+              "serverRssMb": 1124,
+              "clientLagP99Ms": 5
+            }
+          },
+          {
+            "members": 500,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 613.62,
+              "p50": 708.49,
+              "p90": 883.14,
+              "p95": 963.6,
+              "p99": 972.03,
+              "max": 972.48
+            },
+            "joinsPerSecond": 8.5,
+            "presenceKbPerJoin": 9634,
+            "window": {
+              "ms": 11745,
+              "serverCpuPercent": 113,
+              "busiestProcessCpuPercent": 94,
+              "serverRssMb": 1259,
+              "clientLagP99Ms": 4
+            }
+          },
+          {
+            "members": 750,
+            "joins": 250,
+            "connect": {
+              "count": 250,
+              "mean": 1217.6,
+              "p50": 1020.77,
+              "p90": 2222.1,
+              "p95": 2683.04,
+              "p99": 3245.21,
+              "max": 3390.39
+            },
+            "joinsPerSecond": 3.6,
+            "presenceKbPerJoin": 18833,
+            "window": {
+              "ms": 70382,
+              "serverCpuPercent": 111,
+              "busiestProcessCpuPercent": 96,
+              "serverRssMb": 1615,
+              "clientLagP99Ms": 8
+            }
+          }
+        ],
+        "stopped": "p95 time-to-welcome passed 2000ms at 750 members"
+      },
+      "history": {
+        "messages": 2000,
+        "boostEvery": 10,
+        "welcomes": 30,
+        "passes": 3,
+        "welcome": {
+          "count": 30,
+          "mean": 14.13,
+          "p50": 7.48,
+          "p90": 10.68,
+          "p95": 11.5,
+          "p99": 191.17,
+          "max": 191.17
+        },
+        "page": {
+          "count": 117,
+          "mean": 2.13,
+          "p50": 2.01,
+          "p90": 2.66,
+          "p95": 2.81,
+          "p99": 4.82,
+          "max": 4.9
+        }
+      }
+    },
+    "d1": {
+      "latency": {
+        "messages": 300,
+        "rate": 20,
+        "ack": {
+          "count": 300,
+          "mean": 4.29,
+          "p50": 4.1,
+          "p90": 5.16,
+          "p95": 5.92,
+          "p99": 6.58,
+          "max": 12.12
+        },
+        "delivery": {
+          "count": 300,
+          "mean": 4.54,
+          "p50": 4.33,
+          "p90": 5.61,
+          "p95": 6.23,
+          "p99": 7.1,
+          "max": 14.19
+        },
+        "lost": 0,
+        "window": {
+          "ms": 14961,
+          "serverCpuPercent": 12,
+          "busiestProcessCpuPercent": 8,
+          "serverRssMb": 562,
+          "clientLagP99Ms": 1
+        }
+      },
+      "throughput": {
+        "messages": 3000,
+        "senders": 4,
+        "inFlight": 8,
+        "messagesPerSecond": 536.4,
+        "ack": {
+          "count": 3000,
+          "mean": 59.35,
+          "p50": 56.68,
+          "p90": 72.46,
+          "p95": 77.32,
+          "p99": 85.2,
+          "max": 109.84
+        },
+        "outOfOrder": 0,
+        "errors": 0,
+        "timedOut": false,
+        "window": {
+          "ms": 5593,
+          "serverCpuPercent": 114,
+          "busiestProcessCpuPercent": 100,
+          "serverRssMb": 769,
+          "clientLagP99Ms": 3
+        }
+      },
+      "fanout": [
+        {
+          "members": 10,
+          "messages": 100,
+          "rate": 10,
+          "delivery": {
+            "count": 1000,
+            "mean": 6.56,
+            "p50": 6.03,
+            "p90": 7.98,
+            "p95": 9,
+            "p99": 17.13,
+            "max": 23.76
+          },
+          "completion": {
+            "count": 100,
+            "mean": 6.65,
+            "p50": 6.14,
+            "p90": 8.03,
+            "p95": 9,
+            "p99": 17.13,
+            "max": 23.76
+          },
+          "deliveriesPerSecond": 100.9,
+          "lost": 0,
+          "outOfOrder": 0,
+          "window": {
+            "ms": 9910,
+            "serverCpuPercent": 8,
+            "busiestProcessCpuPercent": 5,
+            "serverRssMb": 592,
+            "clientLagP99Ms": 1
+          }
+        },
+        {
+          "members": 100,
+          "messages": 100,
+          "rate": 10,
+          "delivery": {
+            "count": 10000,
+            "mean": 21.33,
+            "p50": 21.04,
+            "p90": 25.43,
+            "p95": 27.44,
+            "p99": 30.91,
+            "max": 32.85
+          },
+          "completion": {
+            "count": 100,
+            "mean": 22.49,
+            "p50": 21.9,
+            "p90": 26.38,
+            "p95": 28.61,
+            "p99": 31.65,
+            "max": 32.85
+          },
+          "deliveriesPerSecond": 1006.5,
+          "lost": 0,
+          "outOfOrder": 0,
+          "window": {
+            "ms": 9935,
+            "serverCpuPercent": 21,
+            "busiestProcessCpuPercent": 14,
+            "serverRssMb": 735,
+            "clientLagP99Ms": 3
+          }
+        },
+        {
+          "members": 250,
+          "messages": 100,
+          "rate": 10,
+          "delivery": {
+            "count": 25000,
+            "mean": 46.94,
+            "p50": 46.11,
+            "p90": 53.68,
+            "p95": 57.31,
+            "p99": 79.36,
+            "max": 104.31
+          },
+          "completion": {
+            "count": 100,
+            "mean": 50.11,
+            "p50": 49.06,
+            "p90": 55.69,
+            "p95": 59.22,
+            "p99": 79.36,
+            "max": 104.31
+          },
+          "deliveriesPerSecond": 2512.3,
+          "lost": 0,
+          "outOfOrder": 0,
+          "window": {
+            "ms": 9951,
+            "serverCpuPercent": 46,
+            "busiestProcessCpuPercent": 30,
+            "serverRssMb": 953,
+            "clientLagP99Ms": 7
+          }
+        },
+        {
+          "members": 500,
+          "messages": 100,
+          "rate": 10,
+          "delivery": {
+            "count": 50000,
+            "mean": 92.01,
+            "p50": 90.54,
+            "p90": 107.16,
+            "p95": 115.43,
+            "p99": 157.82,
+            "max": 200.72
+          },
+          "completion": {
+            "count": 100,
+            "mean": 100.3,
+            "p50": 97.08,
+            "p90": 114.14,
+            "p95": 128.03,
+            "p99": 176.54,
+            "max": 200.72
+          },
+          "deliveriesPerSecond": 5004,
+          "lost": 0,
+          "outOfOrder": 0,
+          "window": {
+            "ms": 9992,
+            "serverCpuPercent": 80,
+            "busiestProcessCpuPercent": 56,
+            "serverRssMb": 1264,
+            "clientLagP99Ms": 13
+          }
+        }
+      ],
+      "connections": {
+        "sizes": [
+          100,
+          200,
+          300,
+          400,
+          500,
+          750,
+          1000
+        ],
+        "concurrency": 8,
+        "maxConnectP95Ms": 2000,
+        "steps": [
+          {
+            "members": 100,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 50.91,
+              "p50": 43.24,
+              "p90": 88.45,
+              "p95": 102.11,
+              "p99": 112.01,
+              "max": 118.45
+            },
+            "joinsPerSecond": 65,
+            "presenceKbPerJoin": 154,
+            "window": {
+              "ms": 1539,
+              "serverCpuPercent": 103,
+              "busiestProcessCpuPercent": 70,
+              "serverRssMb": 714,
+              "clientLagP99Ms": 10
+            }
+          },
+          {
+            "members": 200,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 127.78,
+              "p50": 116.33,
+              "p90": 220.43,
+              "p95": 245.02,
+              "p99": 275.34,
+              "max": 287.13
+            },
+            "joinsPerSecond": 30,
+            "presenceKbPerJoin": 1089,
+            "window": {
+              "ms": 3332,
+              "serverCpuPercent": 113,
+              "busiestProcessCpuPercent": 85,
+              "serverRssMb": 873,
+              "clientLagP99Ms": 7
+            }
+          },
+          {
+            "members": 300,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 213.11,
+              "p50": 223.8,
+              "p90": 335.18,
+              "p95": 367.92,
+              "p99": 411.02,
+              "max": 442.52
+            },
+            "joinsPerSecond": 18.5,
+            "presenceKbPerJoin": 2982,
+            "window": {
+              "ms": 5398,
+              "serverCpuPercent": 116,
+              "busiestProcessCpuPercent": 91,
+              "serverRssMb": 1037,
+              "clientLagP99Ms": 7
+            }
+          },
+          {
+            "members": 400,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 375.58,
+              "p50": 355.76,
+              "p90": 637.25,
+              "p95": 697.49,
+              "p99": 756.23,
+              "max": 798.86
+            },
+            "joinsPerSecond": 11.3,
+            "presenceKbPerJoin": 5830,
+            "window": {
+              "ms": 8888,
+              "serverCpuPercent": 116,
+              "busiestProcessCpuPercent": 92,
+              "serverRssMb": 1129,
+              "clientLagP99Ms": 4
+            }
+          },
+          {
+            "members": 500,
+            "joins": 100,
+            "connect": {
+              "count": 100,
+              "mean": 566.73,
+              "p50": 543.22,
+              "p90": 957.47,
+              "p95": 1029.78,
+              "p99": 1144.55,
+              "max": 1148.24
+            },
+            "joinsPerSecond": 7.6,
+            "presenceKbPerJoin": 9634,
+            "window": {
+              "ms": 13225,
+              "serverCpuPercent": 113,
+              "busiestProcessCpuPercent": 94,
+              "serverRssMb": 1265,
+              "clientLagP99Ms": 6
+            }
+          },
+          {
+            "members": 750,
+            "joins": 250,
+            "connect": {
+              "count": 250,
+              "mean": 1354.36,
+              "p50": 1080.67,
+              "p90": 2944.66,
+              "p95": 3550.36,
+              "p99": 4093.6,
+              "max": 4326.57
+            },
+            "joinsPerSecond": 3.3,
+            "presenceKbPerJoin": 18833,
+            "window": {
+              "ms": 76688,
+              "serverCpuPercent": 112,
+              "busiestProcessCpuPercent": 96,
+              "serverRssMb": 1615,
+              "clientLagP99Ms": 9
+            }
+          }
+        ],
+        "stopped": "p95 time-to-welcome passed 2000ms at 750 members"
+      },
+      "history": {
+        "messages": 2000,
+        "boostEvery": 10,
+        "welcomes": 30,
+        "passes": 3,
+        "welcome": {
+          "count": 30,
+          "mean": 10.37,
+          "p50": 9.03,
+          "p90": 14.29,
+          "p95": 14.5,
+          "p99": 14.83,
+          "max": 14.83
+        },
+        "page": {
+          "count": 117,
+          "mean": 4.8,
+          "p50": 4.42,
+          "p90": 5.45,
+          "p95": 7.39,
+          "p99": 12.6,
+          "max": 16.43
+        }
+      }
+    }
+  },
+  "web": {
+    "chrome": "141.0.7390.37",
+    "bundle": {
+      "files": [
+        {
+          "file": "assets/index-C6M0BAHg.js",
+          "kb": 374,
+          "gzipKb": 117,
+          "brotliKb": 101
+        },
+        {
+          "file": "assets/index-Dnyt8zfK.css",
+          "kb": 42,
+          "gzipKb": 8.3,
+          "brotliKb": 7.3
+        },
+        {
+          "file": "ember-icon.png",
+          "kb": 20.5,
+          "gzipKb": 20.5,
+          "brotliKb": 20.4
+        },
+        {
+          "file": "index.html",
+          "kb": 0.9,
+          "gzipKb": 0.5,
+          "brotliKb": 0.4
+        }
+      ],
+      "code": {
+        "kb": 416,
+        "gzipKb": 125.3,
+        "brotliKb": 108.3
+      }
+    },
+    "lighthouse": [
+      {
+        "page": "sign-in",
+        "formFactor": "mobile",
+        "runs": 3,
+        "score": 99,
+        "fcpMs": 1518,
+        "lcpMs": 1552,
+        "tbtMs": 8,
+        "cls": 0,
+        "speedIndexMs": 1518,
+        "transferKb": 148
+      },
+      {
+        "page": "room",
+        "formFactor": "mobile",
+        "runs": 3,
+        "score": 96,
+        "fcpMs": 1574,
+        "lcpMs": 1952,
+        "tbtMs": 189,
+        "cls": 0,
+        "speedIndexMs": 1574,
+        "transferKb": 148
+      },
+      {
+        "page": "sign-in",
+        "formFactor": "desktop",
+        "runs": 3,
+        "score": 100,
+        "fcpMs": 383,
+        "lcpMs": 393,
+        "tbtMs": 0,
+        "cls": 0,
+        "speedIndexMs": 383,
+        "transferKb": 148
+      },
+      {
+        "page": "room",
+        "formFactor": "desktop",
+        "runs": 3,
+        "score": 100,
+        "fcpMs": 375,
+        "lcpMs": 448,
+        "tbtMs": 0,
+        "cls": 0.001,
+        "speedIndexMs": 375,
+        "transferKb": 148
+      }
+    ],
+    "render": [
+      {
+        "cpuSlowdown": 1,
+        "roomReadyMs": 283,
+        "loadOlder": {
+          "count": 17,
+          "mean": 67.76,
+          "p50": 66.9,
+          "p90": 89.4,
+          "p95": 137,
+          "p99": 137,
+          "max": 137
+        },
+        "bursts": [
+          {
+            "timeline": 50,
+            "messages": 100,
+            "rate": 20,
+            "frameToDom": {
+              "count": 100,
+              "mean": 3.42,
+              "p50": 3.3,
+              "p90": 4.2,
+              "p95": 4.4,
+              "p99": 5,
+              "max": 5.7
+            },
+            "frameToPaint": {
+              "count": 100,
+              "mean": 11.06,
+              "p50": 11.6,
+              "p90": 13.2,
+              "p95": 13.5,
+              "p99": 14.5,
+              "max": 16.3
+            },
+            "mainThreadMsPerMessage": 9.28,
+            "mainThreadBreakdown": {
+              "scriptMs": 3.74,
+              "styleMs": 0.32,
+              "layoutMs": 0.66
+            },
+            "longTasks": 0,
+            "totalBlockingTimeMs": 0,
+            "idleMainThreadMsPerSecond": 1.9,
+            "heapMb": 8.6,
+            "missing": 0
+          },
+          {
+            "timeline": 1000,
+            "messages": 100,
+            "rate": 20,
+            "frameToDom": {
+              "count": 100,
+              "mean": 9.83,
+              "p50": 9.4,
+              "p90": 12.6,
+              "p95": 13.1,
+              "p99": 14.5,
+              "max": 14.8
+            },
+            "frameToPaint": {
+              "count": 100,
+              "mean": 23.14,
+              "p50": 21.7,
+              "p90": 31.9,
+              "p95": 35.6,
+              "p99": 38.8,
+              "max": 39.1
+            },
+            "mainThreadMsPerMessage": 28.27,
+            "mainThreadBreakdown": {
+              "scriptMs": 12.32,
+              "styleMs": 0.58,
+              "layoutMs": 2.62
+            },
+            "longTasks": 0,
+            "totalBlockingTimeMs": 0,
+            "idleMainThreadMsPerSecond": 23.6,
+            "heapMb": 45.8,
+            "missing": 0
+          }
+        ]
+      },
+      {
+        "cpuSlowdown": 4,
+        "roomReadyMs": 1284,
+        "loadOlder": {
+          "count": 17,
+          "mean": 335.41,
+          "p50": 327.8,
+          "p90": 456.9,
+          "p95": 490.8,
+          "p99": 490.8,
+          "max": 490.8
+        },
+        "bursts": [
+          {
+            "timeline": 50,
+            "messages": 100,
+            "rate": 20,
+            "frameToDom": {
+              "count": 100,
+              "mean": 17.62,
+              "p50": 16.2,
+              "p90": 22.7,
+              "p95": 26.3,
+              "p99": 45,
+              "max": 55.8
+            },
+            "frameToPaint": {
+              "count": 100,
+              "mean": 38.7,
+              "p50": 36.6,
+              "p90": 51.8,
+              "p95": 61.5,
+              "p99": 82.9,
+              "max": 88.1
+            },
+            "mainThreadMsPerMessage": 40.98,
+            "mainThreadBreakdown": {
+              "scriptMs": 17.68,
+              "styleMs": 1.41,
+              "layoutMs": 2.99
+            },
+            "longTasks": 0,
+            "totalBlockingTimeMs": 0,
+            "idleMainThreadMsPerSecond": 8.3,
+            "heapMb": 11,
+            "missing": 0
+          },
+          {
+            "timeline": 1000,
+            "messages": 100,
+            "rate": 20,
+            "frameToDom": {
+              "count": 100,
+              "mean": 106.04,
+              "p50": 111.3,
+              "p90": 127.2,
+              "p95": 149.6,
+              "p99": 157.8,
+              "max": 159
+            },
+            "frameToPaint": {
+              "count": 100,
+              "mean": 220.12,
+              "p50": 232.1,
+              "p90": 271.4,
+              "p95": 278.9,
+              "p99": 308.4,
+              "max": 315.1
+            },
+            "mainThreadMsPerMessage": 52.05,
+            "mainThreadBreakdown": {
+              "scriptMs": 20.19,
+              "styleMs": 1.28,
+              "layoutMs": 5
+            },
+            "longTasks": 63,
+            "totalBlockingTimeMs": 582,
+            "idleMainThreadMsPerSecond": 31.9,
+            "heapMb": 42.7,
+            "missing": 0
+          }
+        ]
+      }
+    ]
+  }
+}

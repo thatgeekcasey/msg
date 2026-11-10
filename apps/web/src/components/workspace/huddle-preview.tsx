@@ -1,0 +1,207 @@
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import type { LiveHuddle, Me, SharedRoom } from "@ember/protocol";
+import { Field } from "@/components/field";
+import { Microphone, MicrophoneMute, Xmark } from "@/components/icons/iconoir";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { PeopleContext } from "@/hooks/use-directory";
+import { useHuddle } from "@/hooks/use-huddle";
+import { joinHuddle } from "@/lib/huddle";
+import { closeMicrophone, listDevices, microphoneOf, NO_DEVICES, openMicrophone, rememberDevice, rememberedDevice, watchDevices } from "@/lib/huddle-devices";
+import { inItNow } from "@/lib/huddle-people";
+import { cn } from "@/lib/utils";
+import { SELECT } from "./model-picker";
+import { DIALOG, DIALOG_BACKDROP, DIALOG_CLOSE, DIALOG_TITLE, MAIN_ACTION, OTHER_ACTION } from "./unsaved-changes";
+import { UserAvatar } from "./user-avatar";
+
+/** What the preview says while the browser asks whether Ember may use a microphone. */
+export const ASKING_FOR_MICROPHONE = "Waiting for your browser to let Ember use your microphone…";
+/** And once there's none it may use. */
+export const NO_MICROPHONE = "Ember has no microphone to use, so you'll only listen. To speak, let this site use your microphone in your browser's settings, then join again.";
+
+/**
+ * The microphone the preview has open, which it asks the browser for as it opens: undefined while the
+ * browser asks the person, and null once there's none to use. It closes with the preview, unless the
+ * huddle took it. The devices are listed once it's open, when the browser names them.
+ */
+function usePreviewMicrophone() {
+  const [stream, setStream] = useState<MediaStream | null>();
+  const [devices, setDevices] = useState(NO_DEVICES);
+  const open = useRef<MediaStream | null>(null);
+  // Counts what the browser has been asked, so an answer to anything but the last is closed again.
+  const asked = useRef(0);
+
+  const ask = useCallback(async (deviceId: string | null) => {
+    const asking = ++asked.current;
+    closeMicrophone(open.current);
+    open.current = null;
+    setStream(undefined);
+    const opened = await openMicrophone(deviceId);
+    const listed = asked.current === asking ? await listDevices() : NO_DEVICES;
+    if (asked.current !== asking) return closeMicrophone(opened);
+    open.current = opened;
+    setStream(opened);
+    setDevices(listed);
+  }, []);
+
+  useEffect(() => {
+    void ask(rememberedDevice("microphone"));
+    const stopWatching = watchDevices(() => void listDevices().then(setDevices));
+    return () => {
+      asked.current++;
+      stopWatching();
+      closeMicrophone(open.current);
+      open.current = null;
+    };
+  }, [ask]);
+
+  // A microphone unplugged while it's previewed gives way to the browser's own choice.
+  useEffect(() => {
+    const track = stream?.getAudioTracks()[0];
+    if (!track) return;
+    const gone = () => void ask(null);
+    track.addEventListener("ended", gone);
+    return () => track.removeEventListener("ended", gone);
+  }, [stream, ask]);
+
+  /** Hands the microphone to the huddle, which closes it from then on. */
+  const take = () => {
+    const taken = open.current;
+    open.current = null;
+    return taken;
+  };
+  return { stream, devices, ask, take };
+}
+
+/** Keeps a button's words on one line beside the other button, on a phone 320px wide too. */
+const ON_ONE_LINE = "whitespace-nowrap upto-480px:px-4";
+
+interface Props {
+  room: SharedRoom;
+  me: Me;
+  /** The huddle going on in the room, as the sidebar last heard, if one is. */
+  live: LiveHuddle | undefined;
+  onClose: () => void;
+}
+
+/**
+ * The preview a huddle starts from, as Slack shows before one starts or you join one: who's in it, your
+ * picture over the switch that mutes your microphone, what to speak and listen through, then Cancel and
+ * Start Huddle or Join Huddle. Opening it asks the browser for the microphone, so the huddle starts with
+ * it open, or listening only when there's none.
+ */
+export function HuddlePreview({ room, me, live, onClose }: Props) {
+  const people = useContext(PeopleContext);
+  const joined = useHuddle();
+  const { stream, devices, ask, take } = usePreviewMicrophone();
+  const [muted, setMuted] = useState(false);
+  const [speakerId, setSpeakerId] = useState(() => rememberedDevice("speaker") ?? "");
+  const title = useRef<HTMLHeadingElement>(null);
+
+  const inIt = live?.userIds ?? [];
+  const others = inIt.filter((userId) => userId !== me.id);
+  const going = inIt.length > 0;
+  const description = [
+    others.length > 0 ? inItNow(others.flatMap((userId) => people.get(userId)?.name ?? []), others.length) : !going && `Everyone in ${room.name} can join once it starts.`,
+    inIt.length > others.length && "You're in it in another tab or on another device, and joining here leaves it there.",
+    joined && `${going ? "Joining" : "Starting"} it leaves the huddle you're in now.`,
+  ];
+
+  // The microphone that's open leads the list where the browser's list leaves it out.
+  const microphone = microphoneOf(stream ?? null);
+  const microphones = devices.microphones.some(({ deviceId }) => deviceId === microphone)
+    ? devices.microphones
+    : [{ deviceId: microphone, label: stream?.getAudioTracks()[0]?.label ?? "" }, ...devices.microphones];
+  // A browser that lists its own choice of speaker has it first, and the others get one to choose.
+  const speakers = devices.speakers.some(({ deviceId }) => deviceId === "default") ? devices.speakers : [{ deviceId: "", label: "System default" }, ...devices.speakers];
+  const speaker = speakers.find(({ deviceId }) => deviceId === speakerId)?.deviceId ?? speakers[0]!.deviceId;
+  const silent = muted || !stream;
+
+  const chooseMicrophone = (deviceId: string) => {
+    rememberDevice("microphone", deviceId);
+    void ask(deviceId);
+  };
+  const chooseSpeaker = (deviceId: string) => {
+    rememberDevice("speaker", deviceId);
+    setSpeakerId(deviceId);
+  };
+  const join = () => {
+    joinHuddle({ roomId: room.id, muted, microphone: take(), speakerId: speaker });
+    onClose();
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => open || onClose()}>
+      <DialogContent
+        showCloseButton={false}
+        overlayClassName={DIALOG_BACKDROP}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          title.current?.focus();
+        }}
+        className={cn(DIALOG, "w-[460px]")}
+      >
+        <button type="button" aria-label="Cancel" onClick={onClose} className={DIALOG_CLOSE}>
+          <Xmark className="size-[18px]" />
+        </button>
+        <DialogTitle ref={title} tabIndex={-1} className={cn(DIALOG_TITLE, "pe-10 wrap-anywhere outline-none")}>
+          {going ? `Join the huddle in ${room.name}` : `Start a huddle in ${room.name}`}
+        </DialogTitle>
+        <DialogDescription className="leading-[1.65] text-muted-foreground">{description.filter(Boolean).join(" ")}</DialogDescription>
+
+        {/* As wide a picture as a camera's will be, and taller where a narrow phone's wouldn't hold the two. */}
+        <div className="mt-5 grid aspect-[16/9] place-content-center justify-items-center gap-3.5 rounded-xl border bg-surface py-4">
+          <UserAvatar user={me} square className="size-[88px] rounded-2xl upto-480px:size-[72px]" />
+          <button
+            type="button"
+            aria-label={silent ? "Unmute microphone" : "Mute microphone"}
+            disabled={!stream}
+            onClick={() => setMuted(!muted)}
+            className={cn(
+              "grid size-10 cursor-pointer place-items-center rounded-full border touch:size-11 disabled:cursor-default disabled:opacity-50 [&_svg]:size-5",
+              silent ? "bg-background text-foreground enabled:hover:bg-hover" : "border-transparent bg-foreground text-background",
+            )}
+          >
+            {silent ? <MicrophoneMute /> : <Microphone />}
+          </button>
+        </div>
+
+        {stream && (
+          <div className="mt-5 grid gap-3.5">
+            <Field id="huddle_microphone" label="Microphone">
+              <select id="huddle_microphone" value={microphone} onChange={(event) => chooseMicrophone(event.target.value)} className={SELECT}>
+                {microphones.map(({ deviceId, label }, index) => (
+                  <option key={deviceId} value={deviceId}>
+                    {label || `Microphone ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {devices.speakers.length > 0 && (
+              <Field id="huddle_speaker" label="Speaker">
+                <select id="huddle_speaker" value={speaker} onChange={(event) => chooseSpeaker(event.target.value)} className={SELECT}>
+                  {speakers.map(({ deviceId, label }, index) => (
+                    <option key={deviceId} value={deviceId}>
+                      {label || `Speaker ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+          </div>
+        )}
+        <p role="status" className="mt-5 leading-[1.65] text-muted-foreground empty:mt-0">
+          {stream === undefined ? ASKING_FOR_MICROPHONE : stream === null ? NO_MICROPHONE : null}
+        </p>
+
+        <div className="mt-[26px] flex justify-end gap-2.5">
+          <button type="button" onClick={onClose} className={cn(OTHER_ACTION, ON_ONE_LINE)}>
+            Cancel
+          </button>
+          <button type="button" disabled={stream === undefined} onClick={join} className={cn(MAIN_ACTION, ON_ONE_LINE)}>
+            {going ? "Join Huddle" : "Start Huddle"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

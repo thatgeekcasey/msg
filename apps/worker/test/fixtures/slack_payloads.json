@@ -1,0 +1,943 @@
+[
+  {
+    "name": "Prometheus Alertmanager, a firing alert from its default templates",
+    "source": "https://github.com/prometheus/alertmanager/blob/main/notify/slack/slack.go",
+    "payload": {
+      "channel": "#alerts",
+      "username": "Alertmanager",
+      "icon_emoji": "",
+      "icon_url": "",
+      "link_names": false,
+      "attachments": [
+        {
+          "title": "[FIRING:2] InstanceDown (node-exporter production)",
+          "title_link": "https://alertmanager.example.com/#/alerts?receiver=slack-alerts",
+          "pretext": "",
+          "text": "",
+          "fallback": "[FIRING:2] InstanceDown (node-exporter production) | https://alertmanager.example.com/#/alerts?receiver=slack-alerts",
+          "callback_id": "",
+          "footer": "",
+          "color": "danger",
+          "mrkdwn_in": [
+            "fallback",
+            "pretext",
+            "text"
+          ]
+        }
+      ]
+    },
+    "message": {
+      "body": "",
+      "plainText": "[FIRING:2] InstanceDown (node-exporter production)",
+      "cards": [
+        {
+          "source": "attachment",
+          "color": "danger",
+          "parts": [
+            {
+              "kind": "title",
+              "text": "[FIRING:2] InstanceDown (node-exporter production)",
+              "href": "https://alertmanager.example.com/#/alerts?receiver=slack-alerts"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "Grafana Alerting, a firing alert from its default templates",
+    "source": "https://github.com/grafana/alerting/blob/main/receivers/slack/slack.go",
+    "payload": {
+      "channel": "#alerts",
+      "username": "Grafana",
+      "attachments": [
+        {
+          "title": "[FIRING:1] HighCPU (web-1 production)",
+          "title_link": "https://grafana.example.com/alerting/list",
+          "text": "**Firing**\n\nValue: A=97.2\nLabels:\n - alertname = HighCPU\n - instance = web-1\n - env = production\nAnnotations:\n - summary = CPU above 90% for 5 minutes\nSource: https://grafana.example.com/alerting/grafana/cpu-high/view?orgId=1\nSilence: https://grafana.example.com/alerting/silence/new?alertmanager=grafana&matcher=alertname%3DHighCPU\nDashboard: https://grafana.example.com/d/node-overview?orgId=1\n",
+          "fallback": "[FIRING:1] HighCPU (web-1 production)",
+          "footer": "Grafana v12.2.0",
+          "footer_icon": "https://grafana.com/static/assets/img/fav32.png",
+          "color": "#D63232",
+          "ts": 1792584000
+        }
+      ]
+    },
+    "message": {
+      "body": "",
+      "plainText": "[FIRING:1] HighCPU (web-1 production)\n**Firing**\n\nValue: A=97.2\nLabels:\n - alertname = HighCPU\n - instance = web-1\n - env = production\nAnnotations:\n - summary = CPU above 90% for 5 minutes\nSource: https://grafana.example.com/alerting/grafana/cpu-high/view?orgId=1\nSilence: https://grafana.example.com/alerting/silence/new?alertmanager=grafana&matcher=alertname%3DHighCPU\nDashboard: https://grafana.example.com/d/node-overview?orgId=1\nGrafana v12.2.0",
+      "cards": [
+        {
+          "source": "attachment",
+          "color": "#d63232",
+          "parts": [
+            {
+              "kind": "title",
+              "text": "[FIRING:1] HighCPU (web-1 production)",
+              "href": "https://grafana.example.com/alerting/list"
+            },
+            {
+              "kind": "text",
+              "html": "<p>**Firing**<br><br>Value: A=97.2<br>Labels:<br> - alertname = HighCPU<br> - instance = web-1<br> - env = production<br>Annotations:<br> - summary = CPU above 90% for 5 minutes<br>Source: https://grafana.example.com/alerting/grafana/cpu-high/view?orgId=1<br>Silence: https://grafana.example.com/alerting/silence/new?alertmanager=grafana&amp;matcher=alertname%3DHighCPU<br>Dashboard: https://grafana.example.com/d/node-overview?orgId=1</p>"
+            },
+            {
+              "kind": "footer",
+              "text": "Grafana v12.2.0",
+              "icon": "https://grafana.com/static/assets/img/fav32.png",
+              "at": 1792584000
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "GitLab, a pipeline that passed",
+    "source": "https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/models/integrations/chat_message/pipeline_message.rb",
+    "payload": {
+      "text": "",
+      "username": "GitLab",
+      "attachments": [
+        {
+          "fallback": "<https://gitlab.example.com/acme/web|web>: Pipeline <https://gitlab.example.com/acme/web/-/pipelines/1042|#1042> of branch <https://gitlab.example.com/acme/web/-/commits/main|main> by Ada Lovelace (ada) has passed in 02:14",
+          "color": "good",
+          "author_name": "Ada Lovelace (ada)",
+          "author_icon": "https://gitlab.example.com/uploads/-/system/user/avatar/1/avatar.png",
+          "author_link": "https://gitlab.example.com/ada",
+          "title": "Pipeline #1042 has passed in 02:14",
+          "title_link": "https://gitlab.example.com/acme/web/-/pipelines/1042",
+          "fields": [
+            {
+              "title": "Branch",
+              "value": "<https://gitlab.example.com/acme/web/-/commits/main|main>",
+              "short": true
+            },
+            {
+              "title": "Commit",
+              "value": "<https://gitlab.example.com/acme/web/-/commit/9f8e7d6c5b4a|Fix the sign-in redirect>",
+              "short": true
+            }
+          ],
+          "footer": "web",
+          "footer_icon": "https://gitlab.example.com/uploads/-/system/project/avatar/7/web.png",
+          "ts": 1792584000
+        }
+      ]
+    },
+    "message": {
+      "body": "",
+      "plainText": "Ada Lovelace (ada)\nPipeline #1042 has passed in 02:14\nBranch\nmain\nCommit\nFix the sign-in redirect\nweb",
+      "cards": [
+        {
+          "source": "attachment",
+          "color": "good",
+          "parts": [
+            {
+              "kind": "author",
+              "name": "Ada Lovelace (ada)",
+              "href": "https://gitlab.example.com/ada",
+              "icon": "https://gitlab.example.com/uploads/-/system/user/avatar/1/avatar.png"
+            },
+            {
+              "kind": "title",
+              "text": "Pipeline #1042 has passed in 02:14",
+              "href": "https://gitlab.example.com/acme/web/-/pipelines/1042"
+            },
+            {
+              "kind": "fields",
+              "fields": [
+                {
+                  "title": "Branch",
+                  "html": "<p><a href=\"https://gitlab.example.com/acme/web/-/commits/main\">main</a></p>",
+                  "short": true
+                },
+                {
+                  "title": "Commit",
+                  "html": "<p><a href=\"https://gitlab.example.com/acme/web/-/commit/9f8e7d6c5b4a\">Fix the sign-in redirect</a></p>",
+                  "short": true
+                }
+              ]
+            },
+            {
+              "kind": "footer",
+              "text": "web",
+              "icon": "https://gitlab.example.com/uploads/-/system/project/avatar/7/web.png",
+              "at": 1792584000
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "GitLab, a pipeline that failed",
+    "source": "https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/models/integrations/chat_message/pipeline_message.rb",
+    "payload": {
+      "text": "",
+      "username": "GitLab",
+      "attachments": [
+        {
+          "fallback": "<https://gitlab.example.com/acme/web|web>: Pipeline <https://gitlab.example.com/acme/web/-/pipelines/1043/failures|#1043> of branch <https://gitlab.example.com/acme/web/-/commits/main|main> by Ada Lovelace (ada) has failed in 01:02",
+          "color": "danger",
+          "author_name": "Ada Lovelace (ada)",
+          "author_icon": "https://gitlab.example.com/uploads/-/system/user/avatar/1/avatar.png",
+          "author_link": "https://gitlab.example.com/ada",
+          "title": "Pipeline #1043 has failed in 01:02",
+          "title_link": "https://gitlab.example.com/acme/web/-/pipelines/1043/failures",
+          "fields": [
+            {
+              "title": "Branch",
+              "value": "<https://gitlab.example.com/acme/web/-/commits/main|main>",
+              "short": true
+            },
+            {
+              "title": "Commit",
+              "value": "<https://gitlab.example.com/acme/web/-/commit/0a1b2c3d4e5f|Upgrade the test runner>",
+              "short": true
+            },
+            {
+              "title": "Failed stage",
+              "value": "<https://gitlab.example.com/acme/web/-/pipelines/1043/failures|test>",
+              "short": true
+            },
+            {
+              "title": "Failed jobs",
+              "value": "<https://gitlab.example.com/acme/web/-/jobs/88231|rspec 1/2>, <https://gitlab.example.com/acme/web/-/jobs/88232|rspec 2/2>",
+              "short": true
+            }
+          ],
+          "footer": "web",
+          "footer_icon": "https://gitlab.example.com/uploads/-/system/project/avatar/7/web.png",
+          "ts": 1792584000
+        }
+      ]
+    },
+    "message": {
+      "body": "",
+      "plainText": "Ada Lovelace (ada)\nPipeline #1043 has failed in 01:02\nBranch\nmain\nCommit\nUpgrade the test runner\nFailed stage\ntest\nFailed jobs\nrspec 1/2, rspec 2/2\nweb",
+      "cards": [
+        {
+          "source": "attachment",
+          "color": "danger",
+          "parts": [
+            {
+              "kind": "author",
+              "name": "Ada Lovelace (ada)",
+              "href": "https://gitlab.example.com/ada",
+              "icon": "https://gitlab.example.com/uploads/-/system/user/avatar/1/avatar.png"
+            },
+            {
+              "kind": "title",
+              "text": "Pipeline #1043 has failed in 01:02",
+              "href": "https://gitlab.example.com/acme/web/-/pipelines/1043/failures"
+            },
+            {
+              "kind": "fields",
+              "fields": [
+                {
+                  "title": "Branch",
+                  "html": "<p><a href=\"https://gitlab.example.com/acme/web/-/commits/main\">main</a></p>",
+                  "short": true
+                },
+                {
+                  "title": "Commit",
+                  "html": "<p><a href=\"https://gitlab.example.com/acme/web/-/commit/0a1b2c3d4e5f\">Upgrade the test runner</a></p>",
+                  "short": true
+                },
+                {
+                  "title": "Failed stage",
+                  "html": "<p><a href=\"https://gitlab.example.com/acme/web/-/pipelines/1043/failures\">test</a></p>",
+                  "short": true
+                },
+                {
+                  "title": "Failed jobs",
+                  "html": "<p><a href=\"https://gitlab.example.com/acme/web/-/jobs/88231\">rspec 1/2</a>, <a href=\"https://gitlab.example.com/acme/web/-/jobs/88232\">rspec 2/2</a></p>",
+                  "short": true
+                }
+              ]
+            },
+            {
+              "kind": "footer",
+              "text": "web",
+              "icon": "https://gitlab.example.com/uploads/-/system/project/avatar/7/web.png",
+              "at": 1792584000
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "Gitea, a push",
+    "source": "https://github.com/go-gitea/gitea/blob/main/services/webhook/slack.go",
+    "payload": {
+      "channel": "#code",
+      "text": "[<https://gitea.example.com/acme/web|acme/web>:<https://gitea.example.com/acme/web/src/branch/main|main>] 2 new commits pushed by ada",
+      "username": "Gitea",
+      "icon_url": "https://gitea.example.com/assets/img/logo.png",
+      "unfurl_links": 0,
+      "link_names": 0,
+      "attachments": [
+        {
+          "fallback": "",
+          "color": "#609926",
+          "title": "https://gitea.example.com/acme/web",
+          "title_link": "https://gitea.example.com/acme/web",
+          "text": "<https://gitea.example.com/acme/web/commit/9f8e7d6c5b4a|9f8e7d6>: Fix the sign-in redirect - Ada Lovelace\n<https://gitea.example.com/acme/web/commit/1a2b3c4d5e6f|1a2b3c4>: Keep &lt;br&gt; in previews - Ada Lovelace"
+        }
+      ]
+    },
+    "message": {
+      "body": "<p>[<a href=\"https://gitea.example.com/acme/web\">acme/web</a>:<a href=\"https://gitea.example.com/acme/web/src/branch/main\">main</a>] 2 new commits pushed by ada</p>",
+      "plainText": "[acme/web:main] 2 new commits pushed by ada\nhttps://gitea.example.com/acme/web\n9f8e7d6: Fix the sign-in redirect - Ada Lovelace\n1a2b3c4: Keep <br> in previews - Ada Lovelace",
+      "cards": [
+        {
+          "source": "attachment",
+          "color": "#609926",
+          "parts": [
+            {
+              "kind": "title",
+              "text": "https://gitea.example.com/acme/web",
+              "href": "https://gitea.example.com/acme/web"
+            },
+            {
+              "kind": "text",
+              "html": "<p><a href=\"https://gitea.example.com/acme/web/commit/9f8e7d6c5b4a\">9f8e7d6</a>: Fix the sign-in redirect - Ada Lovelace<br><a href=\"https://gitea.example.com/acme/web/commit/1a2b3c4d5e6f\">1a2b3c4</a>: Keep &lt;br&gt; in previews - Ada Lovelace</p>"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "Gitea, an issue opened, in a color written without its #",
+    "source": "https://github.com/go-gitea/gitea/blob/main/services/webhook/slack.go",
+    "payload": {
+      "channel": "#code",
+      "text": "[<https://gitea.example.com/acme/web|acme/web>] Issue opened: <https://gitea.example.com/acme/web/issues/12|#12 Sign-in fails on Safari> by <https://gitea.example.com/ada|ada>",
+      "username": "Gitea",
+      "unfurl_links": 0,
+      "link_names": 0,
+      "attachments": [
+        {
+          "fallback": "",
+          "color": "eb6420",
+          "title": "#12 Sign-in fails on Safari",
+          "title_link": "https://gitea.example.com/acme/web/issues/12",
+          "text": "Open the sign-in page in Safari 18 &amp; sign in: the page reloads."
+        }
+      ]
+    },
+    "message": {
+      "body": "<p>[<a href=\"https://gitea.example.com/acme/web\">acme/web</a>] Issue opened: <a href=\"https://gitea.example.com/acme/web/issues/12\">#12 Sign-in fails on Safari</a> by <a href=\"https://gitea.example.com/ada\">ada</a></p>",
+      "plainText": "[acme/web] Issue opened: #12 Sign-in fails on Safari by ada\n#12 Sign-in fails on Safari\nOpen the sign-in page in Safari 18 & sign in: the page reloads.",
+      "cards": [
+        {
+          "source": "attachment",
+          "color": "#eb6420",
+          "parts": [
+            {
+              "kind": "title",
+              "text": "#12 Sign-in fails on Safari",
+              "href": "https://gitea.example.com/acme/web/issues/12"
+            },
+            {
+              "kind": "text",
+              "html": "<p>Open the sign-in page in Safari 18 &amp; sign in: the page reloads.</p>"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "Uptime Kuma, a monitor going down, as a rich message",
+    "source": "https://github.com/louislam/uptime-kuma/blob/master/server/notification-providers/slack.js",
+    "payload": {
+      "text": "[Example API] [🔴 Down] connect ECONNREFUSED 10.0.0.12:443",
+      "channel": "#status",
+      "username": "Uptime Kuma",
+      "icon_emoji": ":robot_face:",
+      "attachments": [
+        {
+          "color": "#e01e5a",
+          "blocks": [
+            {
+              "type": "header",
+              "text": {
+                "type": "plain_text",
+                "text": "Example API"
+              }
+            },
+            {
+              "type": "context",
+              "elements": [
+                {
+                  "type": "mrkdwn",
+                  "text": "_Production / APIs_"
+                }
+              ]
+            },
+            {
+              "type": "section",
+              "fields": [
+                {
+                  "type": "mrkdwn",
+                  "text": "*Message*\n[Example API] [🔴 Down] connect ECONNREFUSED 10.0.0.12:443"
+                },
+                {
+                  "type": "mrkdwn",
+                  "text": "*Time (Europe/Berlin)*\n2026-10-21 14:03:12"
+                }
+              ]
+            },
+            {
+              "type": "actions",
+              "elements": [
+                {
+                  "type": "button",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Visit Uptime Kuma"
+                  },
+                  "value": "Uptime-Kuma",
+                  "url": "https://status.example.com/dashboard/12"
+                },
+                {
+                  "type": "button",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Visit site"
+                  },
+                  "value": "Site",
+                  "url": "https://api.example.com/"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "message": {
+      "body": "<p>[Example API] [🔴 Down] connect ECONNREFUSED 10.0.0.12:443</p>",
+      "plainText": "[Example API] [🔴 Down] connect ECONNREFUSED 10.0.0.12:443\nExample API\nProduction / APIs\nMessage\n[Example API] [🔴 Down] connect ECONNREFUSED 10.0.0.12:443\nTime (Europe/Berlin)\n2026-10-21 14:03:12\nVisit Uptime Kuma · Visit site",
+      "cards": [
+        {
+          "source": "attachment",
+          "color": "#e01e5a",
+          "parts": [
+            {
+              "kind": "header",
+              "text": "Example API"
+            },
+            {
+              "kind": "context",
+              "items": [
+                {
+                  "html": "<p><em>Production / APIs</em></p>"
+                }
+              ]
+            },
+            {
+              "kind": "section",
+              "fields": [
+                {
+                  "html": "<p><strong>Message</strong><br>[Example API] [🔴 Down] connect ECONNREFUSED 10.0.0.12:443</p>",
+                  "short": true
+                },
+                {
+                  "html": "<p><strong>Time (Europe/Berlin)</strong><br>2026-10-21 14:03:12</p>",
+                  "short": true
+                }
+              ]
+            },
+            {
+              "kind": "buttons",
+              "buttons": [
+                {
+                  "text": "Visit Uptime Kuma",
+                  "href": "https://status.example.com/dashboard/12"
+                },
+                {
+                  "text": "Visit site",
+                  "href": "https://api.example.com/"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "Block Kit Builder's approval template, whose buttons only an app could answer",
+    "source": "https://app.slack.com/block-kit-builder",
+    "payload": {
+      "text": "Fred Enriquez asks for a new device",
+      "blocks": [
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": "You have a new request:\n*<https://example.com/people/fred|Fred Enriquez - New device request>*"
+          }
+        },
+        {
+          "type": "section",
+          "fields": [
+            {
+              "type": "mrkdwn",
+              "text": "*Type:*\nComputer (laptop)"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*When:*\nSubmitted Aug 10"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Last Update:*\nMar 10, 2015 (3 years, 5 months)"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Reason:*\nAll vowel keys aren't working."
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Specs:*\n\"Cheetah Pro 15\" - Fast, really fast\""
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "elements": [
+            {
+              "type": "button",
+              "text": {
+                "type": "plain_text",
+                "emoji": true,
+                "text": "Approve"
+              },
+              "style": "primary",
+              "value": "click_me_123"
+            },
+            {
+              "type": "button",
+              "text": {
+                "type": "plain_text",
+                "emoji": true,
+                "text": "Deny"
+              },
+              "style": "danger",
+              "value": "click_me_123"
+            }
+          ]
+        }
+      ]
+    },
+    "message": {
+      "body": "",
+      "plainText": "You have a new request:\nFred Enriquez - New device request\nType:\nComputer (laptop)\nWhen:\nSubmitted Aug 10\nLast Update:\nMar 10, 2015 (3 years, 5 months)\nReason:\nAll vowel keys aren't working.\nSpecs:\n\"Cheetah Pro 15\" - Fast, really fast\"",
+      "cards": [
+        {
+          "source": "blocks",
+          "parts": [
+            {
+              "kind": "section",
+              "html": "<p>You have a new request:<br><strong><a href=\"https://example.com/people/fred\">Fred Enriquez - New device request</a></strong></p>"
+            },
+            {
+              "kind": "section",
+              "fields": [
+                {
+                  "html": "<p><strong>Type:</strong><br>Computer (laptop)</p>",
+                  "short": true
+                },
+                {
+                  "html": "<p><strong>When:</strong><br>Submitted Aug 10</p>",
+                  "short": true
+                },
+                {
+                  "html": "<p><strong>Last Update:</strong><br>Mar 10, 2015 (3 years, 5 months)</p>",
+                  "short": true
+                },
+                {
+                  "html": "<p><strong>Reason:</strong><br>All vowel keys aren't working.</p>",
+                  "short": true
+                },
+                {
+                  "html": "<p><strong>Specs:</strong><br>\"Cheetah Pro 15\" - Fast, really fast\"</p>",
+                  "short": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "A deploy summary in blocks, with a table",
+    "source": "https://docs.slack.dev/reference/block-kit/blocks/table-block",
+    "payload": {
+      "text": "Deployed web 2.4.0 to production",
+      "blocks": [
+        {
+          "type": "header",
+          "text": {
+            "type": "plain_text",
+            "text": "Deployed web 2.4.0 :rocket:",
+            "emoji": true
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": "*3 services* are live in *production*."
+          },
+          "accessory": {
+            "type": "button",
+            "text": {
+              "type": "plain_text",
+              "text": "Release notes"
+            },
+            "url": "https://example.com/releases/2.4.0",
+            "style": "primary"
+          }
+        },
+        {
+          "type": "table",
+          "column_settings": [
+            {
+              "is_wrapped": true
+            },
+            {
+              "align": "right"
+            },
+            {
+              "align": "right"
+            }
+          ],
+          "rows": [
+            [
+              {
+                "type": "raw_text",
+                "text": "Service"
+              },
+              {
+                "type": "raw_text",
+                "text": "Took"
+              },
+              {
+                "type": "raw_text",
+                "text": "Errors"
+              }
+            ],
+            [
+              {
+                "type": "raw_text",
+                "text": "api"
+              },
+              {
+                "type": "raw_text",
+                "text": "1m 12s"
+              },
+              {
+                "type": "raw_number",
+                "value": 0
+              }
+            ],
+            [
+              {
+                "type": "raw_text",
+                "text": "web"
+              },
+              {
+                "type": "raw_text",
+                "text": "48s"
+              },
+              {
+                "type": "raw_number",
+                "value": 0
+              }
+            ],
+            [
+              {
+                "type": "rich_text",
+                "elements": [
+                  {
+                    "type": "rich_text_section",
+                    "elements": [
+                      {
+                        "type": "link",
+                        "url": "https://example.com/workers",
+                        "text": "workers"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "raw_text",
+                "text": "2m 3s"
+              },
+              {
+                "type": "raw_number",
+                "value": 2
+              }
+            ]
+          ]
+        },
+        {
+          "type": "divider"
+        },
+        {
+          "type": "context",
+          "elements": [
+            {
+              "type": "image",
+              "image_url": "https://example.com/ada.png",
+              "alt_text": "Ada Lovelace"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "Started by *Ada Lovelace* at <!date^1792584000^{date_short_pretty} {time}|Oct 21, 2026 12:00 PM UTC>"
+            }
+          ]
+        }
+      ]
+    },
+    "message": {
+      "body": "",
+      "plainText": "Deployed web 2.4.0 🚀\n3 services are live in production.\nRelease notes\nService | Took | Errors\napi | 1m 12s | 0\nweb | 48s | 0\nworkers | 2m 3s | 2\nStarted by Ada Lovelace at Oct 21, 2026 12:00 PM UTC",
+      "cards": [
+        {
+          "source": "blocks",
+          "parts": [
+            {
+              "kind": "header",
+              "text": "Deployed web 2.4.0 🚀"
+            },
+            {
+              "kind": "section",
+              "button": {
+                "text": "Release notes",
+                "href": "https://example.com/releases/2.4.0",
+                "style": "primary"
+              },
+              "html": "<p><strong>3 services</strong> are live in <strong>production</strong>.</p>"
+            },
+            {
+              "kind": "table",
+              "rows": [
+                [
+                  "<p>Service</p>",
+                  "<p>Took</p>",
+                  "<p>Errors</p>"
+                ],
+                [
+                  "<p>api</p>",
+                  "<p>1m 12s</p>",
+                  "<p>0</p>"
+                ],
+                [
+                  "<p>web</p>",
+                  "<p>48s</p>",
+                  "<p>0</p>"
+                ],
+                [
+                  "<p><a href=\"https://example.com/workers\">workers</a></p>",
+                  "<p>2m 3s</p>",
+                  "<p>2</p>"
+                ]
+              ],
+              "columns": [
+                {
+                  "align": "left",
+                  "wrap": true
+                },
+                {
+                  "align": "right",
+                  "wrap": false
+                },
+                {
+                  "align": "right",
+                  "wrap": false
+                }
+              ]
+            },
+            {
+              "kind": "divider"
+            },
+            {
+              "kind": "context",
+              "items": [
+                {
+                  "image": {
+                    "url": "https://example.com/ada.png",
+                    "alt": "Ada Lovelace"
+                  }
+                },
+                {
+                  "html": "<p>Started by <strong>Ada Lovelace</strong> at Oct 21, 2026 12:00 PM UTC</p>"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "Rooms to book, as a carousel of card blocks",
+    "source": "https://docs.slack.dev/reference/block-kit/blocks/carousel-block",
+    "payload": {
+      "text": "Rooms free this afternoon",
+      "blocks": [
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": "Rooms free this afternoon"
+          }
+        },
+        {
+          "type": "carousel",
+          "elements": [
+            {
+              "type": "card",
+              "hero_image": {
+                "type": "image",
+                "image_url": "https://example.com/rooms/lovelace.jpg",
+                "alt_text": "Lovelace, a room with a long table"
+              },
+              "title": {
+                "type": "plain_text",
+                "text": "Lovelace"
+              },
+              "subtitle": {
+                "type": "plain_text",
+                "text": "Second floor · 8 seats"
+              },
+              "body": {
+                "type": "mrkdwn",
+                "text": "Free until *4 PM*"
+              },
+              "actions": [
+                {
+                  "type": "button",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Book"
+                  },
+                  "url": "https://example.com/rooms/lovelace/book",
+                  "style": "primary"
+                },
+                {
+                  "type": "button",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Floor plan"
+                  },
+                  "url": "https://example.com/rooms/lovelace"
+                }
+              ]
+            },
+            {
+              "type": "card",
+              "hero_image": {
+                "type": "image",
+                "image_url": "https://example.com/rooms/hopper.jpg",
+                "alt_text": "Hopper, a room with a whiteboard"
+              },
+              "title": {
+                "type": "plain_text",
+                "text": "Hopper"
+              },
+              "subtitle": {
+                "type": "plain_text",
+                "text": "Third floor · 4 seats"
+              },
+              "body": {
+                "type": "mrkdwn",
+                "text": "Free all afternoon"
+              },
+              "subtext": {
+                "type": "plain_text",
+                "text": "Has a screen"
+              },
+              "actions": [
+                {
+                  "type": "button",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Book"
+                  },
+                  "url": "https://example.com/rooms/hopper/book",
+                  "style": "primary"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "message": {
+      "body": "",
+      "plainText": "Rooms free this afternoon\nLovelace\nSecond floor · 8 seats\nFree until 4 PM\nBook · Floor plan\nHopper\nThird floor · 4 seats\nFree all afternoon\nHas a screen\nBook",
+      "cards": [
+        {
+          "source": "blocks",
+          "parts": [
+            {
+              "kind": "section",
+              "html": "<p>Rooms free this afternoon</p>"
+            },
+            {
+              "kind": "tiles",
+              "tiles": [
+                {
+                  "hero": {
+                    "url": "https://example.com/rooms/lovelace.jpg",
+                    "alt": "Lovelace, a room with a long table"
+                  },
+                  "title": "Lovelace",
+                  "subtitle": "Second floor · 8 seats",
+                  "buttons": [
+                    {
+                      "text": "Book",
+                      "href": "https://example.com/rooms/lovelace/book",
+                      "style": "primary"
+                    },
+                    {
+                      "text": "Floor plan",
+                      "href": "https://example.com/rooms/lovelace"
+                    }
+                  ],
+                  "body": "<p>Free until <strong>4 PM</strong></p>"
+                },
+                {
+                  "hero": {
+                    "url": "https://example.com/rooms/hopper.jpg",
+                    "alt": "Hopper, a room with a whiteboard"
+                  },
+                  "title": "Hopper",
+                  "subtitle": "Third floor · 4 seats",
+                  "buttons": [
+                    {
+                      "text": "Book",
+                      "href": "https://example.com/rooms/hopper/book",
+                      "style": "primary"
+                    }
+                  ],
+                  "body": "<p>Free all afternoon</p>",
+                  "subtext": "<p>Has a screen</p>"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

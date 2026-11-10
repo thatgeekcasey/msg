@@ -1,0 +1,29 @@
+{
+  "name": "@ember/worker",
+  "version": "0.5.0-beta.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev -c ../../wrangler.jsonc --persist-to .wrangler/state --var SESSION_SECRET:local-dev-only --var EMBER_GUEST_SIGN_IN:true",
+    "build": "wrangler deploy -c ../../wrangler.jsonc --dry-run --outdir dist",
+    "typecheck": "tsc -p . && tsc -p scripts && tsc -p scripts/tsconfig.test.json",
+    "test": "vitest run",
+    "cf-typegen": "wrangler types -c ../../wrangler.jsonc --include-runtime false",
+    "d1:migrate:local": "wrangler d1 migrations apply DB -c ../../wrangler.jsonc --local --persist-to .wrangler/state"
+  },
+  "dependencies": {
+    "@ember/protocol": "workspace:*",
+    "@ember/richtext": "workspace:*",
+    "entities": "8.1.0",
+    "marked": "18.1.0",
+    "parse5": "^8.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.0",
+    "@cloudflare/workers-types": "^5.20261012.1",
+    "@ember/web": "workspace:*",
+    "@types/node": "^26.6.5",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.149.0"
+  }
+}

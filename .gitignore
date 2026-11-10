@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+playwright-report/
+test-results/
+perf/results/
+skills-lock.json
+
+# What `pnpm run deploy` deploys a Worker on DO SQLite from, beside its wrangler config, while it deploys.
+*.deploy.json

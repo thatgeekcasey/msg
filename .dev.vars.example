@@ -1,0 +1,39 @@
+# Optional settings for `wrangler dev`: copy this to .dev.vars and uncomment what you need. `pnpm dev`
+# already sets SESSION_SECRET and lets anyone sign in with just a name (EMBER_GUEST_SIGN_IN).
+# Deploy to Cloudflare asks a deployer for each line that isn't commented, which is only the setup
+# password: the deploy makes SESSION_SECRET and the VAPID key pair (apps/worker/scripts/deploy.ts).
+#
+# The name and email address the Set up Ember form suggests, rather than Kevin Rose's.
+# EMBER_SETUP_NAME_PLACEHOLDER=
+# EMBER_SETUP_EMAIL_PLACEHOLDER=
+# The setup password, which Set up Ember asks for before it opens, as a deployed Worker's does; left
+# blank, setup on localhost is open to whoever's there.
+EMBER_SETUP_PASSWORD=
+# Or closes setup behind a link, http://localhost:8787/first_run#token=<this>, as a deploy from a
+# terminal does. Make one with `openssl rand -hex 32`.
+# EMBER_SETUP_TOKEN=
+# Lets apps/worker/scripts/reset-password.ts reset anyone's password, given the same token in its own
+# EMBER_RECOVERY_TOKEN; make one with `openssl rand -hex 32`, and leave it out once you're done.
+# EMBER_RECOVERY_TOKEN=
+# Turns push notifications on: the key pair `pnpm vapid:keys` prints, which browsers subscribe with.
+# VAPID_PUBLIC_KEY=
+# VAPID_PRIVATE_KEY=
+# Whom push services may contact about your pushes, a mailto: or https: address; this project's otherwise.
+# VAPID_SUBJECT=
+# A Memberful custom app's keys, with which an administrator can let a Memberful site's members sign
+# in: the site's address, such as https://example.memberful.com, and the app's OAuth identifier and
+# client secret. The app's OAuth redirect URL is Ember's address followed by /auth/memberful/callback.
+# MEMBERFUL_URL=
+# MEMBERFUL_CLIENT_ID=
+# MEMBERFUL_CLIENT_SECRET=
+# What hearing the site's webhooks takes, at Ember's address followed by /webhooks/memberful, so that a
+# member whose membership lapses is signed out: the app's API key, and the webhook's secret key.
+# MEMBERFUL_API_KEY=
+# MEMBERFUL_WEBHOOK_SECRET=
+# A Turnstile widget's keys, with which open sign-up checks that whoever signs up is a person. Cloudflare's
+# test keys, 1x00000000000000000000AA and 1x0000000000000000000000000000000AA, always pass, on localhost too.
+# TURNSTILE_SITE_KEY=
+# TURNSTILE_SECRET_KEY=
+# Lets plain HTTP through where it would be redirected to HTTPS, which localhost never is: set it to
+# reach `wrangler dev --ip 0.0.0.0` from a phone on your network.
+# DISABLE_SSL=true

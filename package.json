@@ -1,0 +1,46 @@
+{
+  "name": "msg",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @ember/worker --filter @ember/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @ember/e2e test:e2e",
+    "test:features": "pnpm --filter @ember/e2e test:e2e --project features",
+    "test:mobile": "pnpm --filter @ember/e2e test:e2e --project 'mobile *'",
+    "screenshots": "pnpm --filter @ember/e2e test:e2e --project screenshots --update-snapshots",
+    "deploy": "node apps/worker/scripts/deploy.ts",
+    "vapid:keys": "node apps/worker/scripts/vapid-keys.ts",
+    "perf": "pnpm --filter @ember/perf start",
+    "seed": "node apps/worker/scripts/seed.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "^4.149.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "EMBER_SETUP_PASSWORD": {
+        "description": "Make up a setup password nobody would guess. Ember's setup page asks for it once, so only you can set Ember up. Forgot it? Change it in the Worker's Settings, under Variables and Secrets."
+      },
+      "EMAIL": {
+        "description": "Cloudflare Email Service, which sends Ember's email once your account is on Workers Paid and has a domain onboarded to Email Sending."
+      },
+      "FILES": {
+        "description": "The R2 bucket for the files people upload to rooms. Each Ember needs its own, so if the bucket picked here is another Ember's, choose Create new and give it any name."
+      },
+      "STORAGE_BACKEND": {
+        "description": "Where messages live. Keep `do-sqlite`: each room keeps its own, which scales furthest. Or type `d1` for one database you can query, export and restore. Switching later starts an empty Ember."
+      },
+      "DB": {
+        "description": "Holds messages only if STORAGE_BACKEND is `d1`, up to 500 MB on Workers Free or 10 GB on Workers Paid. Each Ember needs its own, so if this is another Ember's, choose Create new."
+      }
+    }
+  }
+}
