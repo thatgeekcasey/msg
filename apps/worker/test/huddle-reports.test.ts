@@ -271,10 +271,13 @@ describe("Who's in a room's huddle, for the rest of the room", () => {
     // A report made earlier than the one kept, or no later, counts for nothing, and answers when that one was made.
     expect(await report(1000, ["a", "b"])).toBe(2000);
     expect(await report(2000, ["b"])).toBe(2000);
-    // One that says what's kept already changes nothing.
+    // One that says what's kept already tells nobody anything, but its time is kept, so one made before it that
+    // arrives after it changes nothing either.
     expect(await report(3000, ["a"])).toBeNull();
     await heardNothing(adasTab);
-    expect([(await sidebarOf(ada)).huddles, await reportedAt()]).toEqual([{ [room]: { startedAt, userIds: ["a"] } }, 2000]);
+    expect(await report(2500, ["b"])).toBe(3000);
+    await heardNothing(adasTab);
+    expect([(await sidebarOf(ada)).huddles, await reportedAt()]).toEqual([{ [room]: { startedAt, userIds: ["a"] } }, 3000]);
 
     // Nor does a report from before a huddle ended bring it back.
     expect(await report(4000, null)).toBeNull();

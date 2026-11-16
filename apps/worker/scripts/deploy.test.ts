@@ -598,17 +598,17 @@ describe("Updates for a copy made with Deploy to Cloudflare", () => {
 
   /**
    * A checkout of a copy of Ember with this script, cloned from `origin` if one's given, and without the
-   * Update Ember workflow unless `workflow`, as Deploy to Cloudflare's copies are: answers the script there.
+   * Update Ember workflow unless `workflow`, as Deploy to Cloudflare's copies are, nor the beta workflow
+   * unless `betaWorkflow`: answers the script there.
    */
-  function checkout({ origin, workflow = false }: { origin?: string; workflow?: boolean } = {}): string {
+  function checkout({ origin, workflow = false, betaWorkflow = false }: { origin?: string; workflow?: boolean; betaWorkflow?: boolean } = {}): string {
     const root = path.join(dir, "checkout");
     const scripts = path.join(root, "apps/worker/scripts");
     mkdirSync(scripts, { recursive: true });
     for (const file of ["deploy.ts", "jsonc.ts", "vapid-keys.ts", "update-ember.yml"]) copyFileSync(new URL(`./${file}`, import.meta.url), path.join(scripts, file));
-    if (workflow) {
-      mkdirSync(path.join(root, ".github/workflows"), { recursive: true });
-      writeFileSync(path.join(root, WORKFLOW), embersWorkflow);
-    }
+    if (workflow || betaWorkflow) mkdirSync(path.join(root, ".github/workflows"), { recursive: true });
+    if (workflow) writeFileSync(path.join(root, WORKFLOW), embersWorkflow);
+    if (betaWorkflow) copyFileSync(new URL("./update-ember-beta.yml", import.meta.url), path.join(root, ".github/workflows/update-ember-beta.yml"));
     spawnSync("git", ["init", "--quiet"], { cwd: root });
     if (origin) spawnSync("git", ["remote", "add", "origin", origin], { cwd: root });
     return path.join(scripts, "deploy.ts");
@@ -655,12 +655,14 @@ describe("Updates for a copy made with Deploy to Cloudflare", () => {
   });
 
   it.each([
-    [false, {}, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:main --var UPDATE_WORKFLOW:false"],
-    [true, { WORKERS_CI_BRANCH: "release/v1#stable" }, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:release/v1#stable --var UPDATE_WORKFLOW:true"],
+    [false, false, {}, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:main --var UPDATE_WORKFLOW:false --var BETA_WORKFLOW:false"],
+    [true, false, { WORKERS_CI_BRANCH: "release/v1#stable" }, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:release/v1#stable --var UPDATE_WORKFLOW:true --var BETA_WORKFLOW:false"],
+    [true, true, {}, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:main --var UPDATE_WORKFLOW:true --var BETA_WORKFLOW:true"],
+    [false, true, {}, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:main --var UPDATE_WORKFLOW:false --var BETA_WORKFLOW:true"],
   ])(
-    "tells the Worker the copy's repository, the branch that deploys and whether it has the workflow (%s), without the clone's credentials, for the release card",
-    (workflow, branch, vars) => {
-      const script = checkout({ origin: "https://x-access-token:ghs_clone-only@github.com/someone/my-ember.git", workflow });
+    "tells the Worker the copy's repository, the branch that deploys and whether it has the workflow (%s) and the beta workflow (%s), without the clone's credentials, for the release card",
+    (workflow, betaWorkflow, branch, vars) => {
+      const script = checkout({ origin: "https://x-access-token:ghs_clone-only@github.com/someone/my-ember.git", workflow, betaWorkflow });
       expect(deploy(EVERY_SECRET, [], { script, env: { CI: "true", WORKERS_CI: "1", ...branch } }).status).toBe(0);
       expect(output("deploy-args")).toBe(vars);
     },
@@ -668,8 +670,8 @@ describe("Updates for a copy made with Deploy to Cloudflare", () => {
 
   it("keeps the vars a deploy's options give over the copy's own", () => {
     const script = checkout({ origin: "git@github.com:someone/my-ember.git", workflow: true });
-    deploy(EVERY_SECRET, ["--var", "GIT_BRANCH:production", "--var=UPDATE_WORKFLOW:false"], { script });
-    expect(output("deploy-args")).toBe("--var GIT_BRANCH:production --var=UPDATE_WORKFLOW:false --var GITHUB_REPOSITORY:someone/my-ember");
+    deploy(EVERY_SECRET, ["--var", "GIT_BRANCH:production", "--var=UPDATE_WORKFLOW:false", "--var", "BETA_WORKFLOW:true"], { script });
+    expect(output("deploy-args")).toBe("--var GIT_BRANCH:production --var=UPDATE_WORKFLOW:false --var BETA_WORKFLOW:true --var GITHUB_REPOSITORY:someone/my-ember");
   });
 
   it("says nothing of the workflow to a copy that has it, nor when wrangler fails to deploy", () => {

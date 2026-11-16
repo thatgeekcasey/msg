@@ -9,21 +9,24 @@ import {
   MAX_INSTRUCTIONS_LENGTH,
   MODELS_FULL,
   modelName,
+  noLongerOffered,
   PAGES_READ_PER_ANSWER,
   WEB_SEARCHES_PER_ANSWER,
   withinMost,
   type AssistantChanges,
   type AssistantModel,
   type AssistantSettings as Assistant,
+  type OfferedModels,
   type WebTool,
 } from "@ember/protocol/assistant";
-import { promptAround, webPromptFor, type Prompt } from "@ember/protocol/prompts";
+import { EMBER_TEMPLATE, promptAround, templateRefusal, webPromptFor, type Prompt } from "@ember/protocol/prompts";
 import { FIELD_INPUT } from "@/components/field";
 import { useFlash } from "@/components/flash";
 import { Switch } from "@/components/ui/switch";
 import { useAccount } from "@/hooks/use-account";
 import { PeopleContext } from "@/hooks/use-directory";
 import { useMounted } from "@/hooks/use-mounted";
+import { useOfferedModels } from "@/hooks/use-offered-models";
 import { useTitle } from "@/hooks/use-title";
 import {
   ApiError,
@@ -37,11 +40,13 @@ import {
 } from "@/lib/api";
 import { avatarVariantOf } from "@/lib/previews";
 import { cn } from "@/lib/utils";
-import { AddAssistantModel } from "./add-assistant-model";
+import { AddAssistantModel, modelsToAddTo } from "./add-assistant-model";
 import { AGENTS_PATH, useAgentsOnly } from "./agent-list";
+import { AgentTools } from "./agent-tools";
 import { AssistantSetup, searchTurnedOff } from "./assistant-setup";
 import { BUTTON } from "./email-settings";
 import { LevelDials } from "./level-dials";
+import { NO_LONGER_OFFERED } from "./model-picker";
 import { PictureField } from "./picture-picker";
 import { PromptPreview } from "./prompt-preview";
 import { CHANGES_SAVED, PageHeading, Panel, SettingsPage } from "./settings-page";
@@ -52,13 +57,14 @@ import { avatarVersionOf } from "./user-avatar";
 // agent's: what the Ember AI card held before there were agents, as the project's owner chose in the
 // mock-ups (2026-11-10). It shows @ember's avatar, which a picture picked replaces, as the project's
 // owner asked (2026-11-05), and Use Ember's flame takes away again, the Instructions administrators add
-// to Ember's own, with what Ember adds around them, the models people can pick on their profile, the one
+// to Ember's own, with what Ember adds around them, which they may modify with caution, as the project's
+// owner asked (2026-11-11), the models people can pick on their profile, the one
 // that answers everyone else chosen, with Add a model and each other's Remove, Search the web's switch,
 // which turns on once the model that answers everyone has searched the web for a test question, saying
 // what it found, or opens Set up Ember AI for a model that can't search, and the dials of the most
-// @ember may think and write for anyone's question. Each change saves at once, but the instructions,
-// which Save instructions saves. While one saves, nothing else can change, so that the save's answer
-// can't show Ember AI as it was.
+// @ember may think and write for anyone's question. Each change saves at once, but the instructions and
+// what Ember adds around them, which Save instructions saves, or Save beside what's modified. While one
+// saves, nothing else can change, so that the save's answer can't show Ember AI as it was.
 
 /** What @ember's page says of it. */
 export const EMBER_EXPLAINED = "Ember's own agent, @ember, which answers anything people ask in every room open to everyone.";
@@ -73,6 +79,9 @@ export const INSTRUCTIONS_UNSAVED = "You’ve changed @ember’s instructions. S
 /** What the page says of its models. */
 export const MODELS_EXPLAINED = "People can pick any of these on their profile for @ember to answer them with. The one chosen here answers everyone else.";
 
+/** What it says under Add a model once people can pick every model Ember offers. */
+export const EVERY_MODEL_ADDED = "People can pick every model Ember offers.";
+
 /** What the page says of its dials. */
 export const LIMITS_EXPLAINED =
   "The most @ember may think and write for anyone's question. Each person picks their own levels on their profile, up to these. AI Gateway's spend limits can cap what each person's questions cost, as every request says who asked.";
@@ -83,7 +92,7 @@ export const WEB_SEARCH_OFF = `@ember answers from what its model learned in tra
 /** What the page says of Search the web while it's on, letting @ember do `webTools` on the web, while people can pick from `models`. */
 export function webSearchOn(webTools: WebTool[], models: readonly AssistantModel[]): string {
   const reads = webTools.includes("read") ? `, and reads the pages people link to or its searches find, at most ${PAGES_READ_PER_ANSWER}` : "";
-  const picked = models.length > 1 ? " A model someone picks searches too, if it's Anthropic's or OpenAI's." : "";
+  const picked = models.length > 1 ? " A model someone picks searches too, if it can." : "";
   return `@ember searches the web when a question needs it, at most ${WEB_SEARCHES_PER_ANSWER} times an answer${reads}, and lists the pages it used under its answer.${picked} AI Gateway's credits pay for each search.`;
 }
 
@@ -151,6 +160,7 @@ export function EmberPage({ me, onFailed }: { me: Me; onFailed: (error: unknown)
         {settings && assistant && (
           <>
             <EmberSettings me={me} assistant={assistant} onSetUp={() => setSettingUp(true)} onStopped={off} onChanged={show} onFailed={failed} />
+            <AgentTools agentId={ASSISTANT_ID} name="@ember" onFailed={failed} />
             {settingUp && (
               <AssistantSetup assistant={assistant} deployedAccountId={settings.cloudflareAccountId} onSaved={show} onClose={() => setSettingUp(false)} onFailed={failed} />
             )}
@@ -184,11 +194,14 @@ type WebTest = "searching" | { found: string } | { refusal: string } | { off: st
 /** Whether Ember AI, as `assistant` has it, searches the web. */
 const searchesIn = (assistant: Assistant) => assistant.webTools?.includes("search") ?? false;
 
-/** What @ember is told around its instructions when `me` writes to it, as it answers anyone who hasn't picked its levels, which Limits may hold lower. */
-function emberPrompt(me: Me, community: string, assistant: Assistant): Prompt {
+/**
+ * What @ember is told around its instructions, from `template`, when `me` writes to it, as it answers
+ * anyone who hasn't picked its levels, which Limits may hold lower.
+ */
+function emberPrompt(me: Me, community: string, assistant: Assistant, template: string): Prompt {
   const web = webPromptFor(me.name, assistant.webTools ?? [], searchesIn(assistant));
   const { length } = withinMost(DEFAULT_LEVELS, assistant.most);
-  return promptAround(ASSISTANT_ID, ASSISTANT_NAME, me.name, { community, roomName: null, inThread: false }, ANSWER_WORDS[length], web, new Date());
+  return promptAround(ASSISTANT_ID, ASSISTANT_NAME, me.name, { community, roomName: null, inThread: false }, ANSWER_WORDS[length], web, new Date(), template);
 }
 
 /** @ember's settings, in one card. */
@@ -202,6 +215,8 @@ export function EmberSettings({ me, assistant, onSetUp, onStopped, onChanged, on
   const [pickedAvatar, setPickedAvatar] = useState<string | null>(null);
   const [savingAvatar, setSavingAvatar] = useState(false);
   const busy = saving || savingAvatar || turningWeb !== null;
+  // The models Ember offers through Ember AI's account, for Add a model and for saying which people can pick that it no longer offers.
+  const offered = useOfferedModels(true, { accountId: assistant.accountId }, onFailed);
   const people = useContext(PeopleContext);
   const community = useAccount().name;
   const flash = useFlash();
@@ -267,13 +282,13 @@ export function EmberSettings({ me, assistant, onSetUp, onStopped, onChanged, on
     saveShown(shown, { ...shown, models: shown.models.filter(({ id }) => id !== model) }, () => removeAssistantModel(model));
 
   /**
-   * Saves `instructions` as what Ember adds to @ember's own, settling with Ember AI once they're saved, or
-   * failing, leaving what's typed as it is.
+   * Saves `changes` to what Ember adds to @ember's own instructions, or around them, settling with Ember AI
+   * once they're saved, or failing, leaving what's typed as it is.
    */
-  const saveInstructions = async (instructions: string) => {
+  const saveInstructions = async (changes: InstructionChanges) => {
     setSaving(true);
     try {
-      const saved = await changeAssistantSettings({ instructions });
+      const saved = await changeAssistantSettings(changes);
       onChanged(saved);
       flash("notice", CHANGES_SAVED);
       return saved;
@@ -348,9 +363,17 @@ export function EmberSettings({ me, assistant, onSetUp, onStopped, onChanged, on
         // Use Ember's flame: no confirmation first, and no notice after, as Remove icon.
         onRemove={() => showAvatar(removeAssistantAvatar())}
       />
-      <Instructions saved={assistant.instructions} prompt={emberPrompt(me, community, assistant)} disabled={busy} onSave={saveInstructions} onFailed={onFailed} />
+      <Instructions
+        saved={assistant.instructions}
+        savedTemplate={assistant.promptTemplate ?? EMBER_TEMPLATE}
+        promptOf={(template) => emberPrompt(me, community, assistant, template)}
+        disabled={busy}
+        onSave={saveInstructions}
+        onFailed={onFailed}
+      />
       <Models
         assistant={assistant}
+        offered={offered}
         disabled={busy}
         onChoose={(model) => change(assistant, { model })}
         onRemove={(model) => remove(assistant, model)}
@@ -364,47 +387,83 @@ export function EmberSettings({ me, assistant, onSetUp, onStopped, onChanged, on
         </div>
         <LevelDials name="assistant-most" levels={assistant.most} disabled={busy} onChange={(changes) => change(assistant, changes)} />
       </div>
-      {adding && <AddAssistantModel assistant={assistant} onAdded={onChanged} onClose={() => setAdding(false)} onFailed={onFailed} />}
+      {adding && <AddAssistantModel assistant={assistant} offered={offered} onAdded={onChanged} onClose={() => setAdding(false)} onFailed={onFailed} />}
     </section>
   );
 }
 
+/** What @ember's Instructions save: what Ember adds to its own instructions, and around them, null for Ember's own. */
+type InstructionChanges = Pick<AssistantChanges, "instructions" | "promptTemplate">;
+
 /**
  * @ember's Instructions: what administrators add to Ember's own, `saved`, in a box that Save instructions
- * saves once what's typed differs, and What Ember adds around them, `prompt`. Leaving the page with what's
- * typed unsaved asks first, even while another change on the page saves.
+ * saves once what's typed differs, and What Ember adds around them, as `promptOf` has it from the template,
+ * `savedTemplate` until it's modified, which Save instructions saves too, as does Save beside it. Leaving
+ * the page with either unsaved asks first, even while another change on the page saves.
  */
 function Instructions({
   saved,
-  prompt,
+  savedTemplate,
+  promptOf,
   disabled,
   onSave,
   onFailed,
 }: {
   saved: string;
-  prompt: Prompt;
+  savedTemplate: string;
+  promptOf: (template: string) => Prompt;
   disabled: boolean;
-  onSave: (instructions: string) => Promise<Assistant>;
+  onSave: (changes: InstructionChanges) => Promise<Assistant>;
   onFailed: (error: unknown) => void;
 }) {
-  // What's typed, or null while the box is as Ember AI has it, when it follows what another tab saves.
+  // What's typed in each box, or null while it's as Ember AI has it, when it follows what another tab saves.
   const [typed, setTyped] = useState<string | null>(null);
+  const [typedTemplate, setTypedTemplate] = useState<string | null>(null);
+  // Why the template was refused, which What Ember adds around them opens to say.
+  const [refusal, setRefusal] = useState<{ error: string } | null>(null);
   const instructions = typed ?? saved;
-  const changed = typed !== null && typed.trim() !== saved;
+  const template = typedTemplate ?? savedTemplate;
+  const instructionsChanged = typed !== null && typed.trim() !== saved;
+  const templateChanged = typedTemplate !== null && typedTemplate.trim() !== savedTemplate;
+  const changed = instructionsChanged || templateChanged;
   const mounted = useMounted();
 
-  /** Saves what's typed, which the box then shows as saved, but for anything typed while it saves, which stays unsaved. */
+  /** Why the template typed can't be saved, which What Ember adds around them opens to say, or null. */
+  const refused = () => {
+    const error = templateChanged ? templateRefusal(template.trim()) : null;
+    if (error !== null) setRefusal({ error });
+    return error;
+  };
+
+  /**
+   * Saves what's changed, which the boxes then show as saved, but for anything typed while it saves, which
+   * stays unsaved, unless the template is one Ember doesn't take.
+   */
   const save = () => {
+    const error = refused();
+    if (error !== null) return Promise.reject(new Error(error));
     const sent = instructions.trim();
-    return onSave(sent).then((assistant) => {
-      if (mounted.current) setTyped((typed) => (typed?.trim() === sent ? null : typed));
+    const sentTemplate = template.trim();
+    const changes: InstructionChanges = {
+      ...(instructionsChanged && { instructions: sent }),
+      ...(templateChanged && { promptTemplate: sentTemplate === EMBER_TEMPLATE ? null : sentTemplate }),
+    };
+    return onSave(changes).then((assistant) => {
+      if (!mounted.current) return assistant;
+      setTyped((typed) => (typed?.trim() === sent ? null : typed));
+      setTypedTemplate((typed) => (typed?.trim() === sentTemplate ? null : typed));
       return assistant;
     });
   };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (changed && !disabled) save().catch((error: unknown) => (mounted.current || isSignedOut(error)) && onFailed(error));
+    if (changed && !disabled && refused() === null) save().catch((error: unknown) => (mounted.current || isSignedOut(error)) && onFailed(error));
+  };
+
+  const changeTemplate = (template: string) => {
+    setTypedTemplate(template);
+    setRefusal(null);
   };
 
   return (
@@ -436,7 +495,21 @@ function Instructions({
           Save instructions
         </button>
       </div>
-      <PromptPreview name="@ember" prompt={prompt} />
+      <PromptPreview
+        name="@ember"
+        prompt={promptOf(template.trim())}
+        template={template}
+        ownTemplate={EMBER_TEMPLATE}
+        refusal={refusal}
+        disabled={false}
+        onChange={changeTemplate}
+        heading="h4"
+        save={
+          <button type="submit" disabled={disabled || !changed} className={BUTTON}>
+            Save
+          </button>
+        }
+      />
       <UnsavedChanges changed={changed} stays={leaves} onSave={save} description={INSTRUCTIONS_UNSAVED} />
     </form>
   );
@@ -473,23 +546,28 @@ function Avatar({ src, uploaded, disabled, onChoose, onRemove }: { src: string; 
 
 /**
  * The models people can pick, in the order they were added, each a radio button that chooses it to
- * answer everyone else, with a Remove for each but that one, and Add a model under them, until there are
- * as many as there can be.
+ * answer everyone else, with a Remove for each but that one, and saying so of one Ember no longer
+ * offers (`noLongerOffered`), as the Worker lists them, `offered`, once it has, and Add a model under them,
+ * until there are as many as there can be, or people can pick every model Ember offers.
  */
 function Models({
   assistant,
+  offered,
   disabled,
   onChoose,
   onRemove,
   onAdd,
 }: {
   assistant: Assistant;
+  offered: OfferedModels | null;
   disabled: boolean;
   onChoose: (model: string) => void;
   onRemove: (model: string) => void;
   onAdd: () => void;
 }) {
   const full = assistant.models.length >= MAX_ASSISTANT_MODELS;
+  const noneToAdd = offered !== null && modelsToAddTo(assistant, offered.models).length === 0;
+  const why = full ? MODELS_FULL : noneToAdd ? EVERY_MODEL_ADDED : null;
   return (
     <div className="flex flex-col gap-3 border-t pt-4">
       <div>
@@ -514,7 +592,15 @@ function Models({
                 onChange={() => onChoose(id)}
                 className="size-4 flex-none accent-foreground"
               />
-              <span className="min-w-0 wrap-anywhere">{name}</span>
+              <span className="min-w-0 wrap-anywhere">
+                {name}
+                {offered && noLongerOffered(id, offered.models, offered.workersAi) && (
+                  <>
+                    {" "}
+                    <span className="text-muted-foreground">({NO_LONGER_OFFERED})</span>
+                  </>
+                )}
+              </span>
             </label>
             {assistant.model !== id && (
               <button type="button" aria-label={`Remove ${name}`} disabled={disabled} onClick={() => onRemove(id)} className={BUTTON}>
@@ -525,12 +611,12 @@ function Models({
         ))}
       </fieldset>
       <div className="flex flex-wrap items-center gap-x-[1ch] gap-y-2">
-        <button type="button" disabled={disabled || full} onClick={onAdd} aria-describedby={full ? "assistant-models-full" : undefined} className={BUTTON}>
+        <button type="button" disabled={disabled || why !== null} onClick={onAdd} aria-describedby={why ? "assistant-models-full" : undefined} className={BUTTON}>
           Add a model
         </button>
-        {full && (
+        {why && (
           <p id="assistant-models-full" className={NOTE}>
-            {MODELS_FULL}
+            {why}
           </p>
         )}
       </div>

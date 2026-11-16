@@ -1,6 +1,5 @@
 import {
   startingInvolvement,
-  suggestedCount,
   type Favorites,
   type Involvement,
   type LiveHuddle,
@@ -9,17 +8,17 @@ import {
   type SharedRoom,
   type Sidebar,
   type SidebarRoom,
-  type User,
 } from "@ember/protocol";
 import { isHidden } from "./involvement";
 
-// Someone's rooms keep the order `GET /api/sidebar` gives them, the order they were made, which `/` and
-// `/rooms` go by. The sidebar lists their DMs apart from the other rooms, and lists the rooms they've
-// starred first, in the order they starred them, then the rooms the workspace's shared order ranks, in
-// its order, then the rest by name: each name lowercased and compared as `localeCompare` compares it, in
-// the browser's language, then by id. Their DMs go by when each was last active, latest first, as
-// Campfire's sorted_list_controller.js sorts them. The rooms someone has hidden, whose level is
-// "invisible", are listed too, for them to open, but their sidebar leaves them out.
+// Someone's rooms keep the order `GET /api/sidebar` gives them, the order they were put in them, which
+// `/` and `/rooms` go by. The sidebar lists their DMs apart from the other rooms, and lists the rooms
+// they've starred first, in the order they starred them, then the rooms the workspace's shared order
+// ranks, in its order, then the rest in the order they were put in them, rather than by name, as the
+// project's owner chose, so a room that's just been made, or that they've just been put in, comes last.
+// Their DMs go by when each was last active, latest first, as Campfire's sorted_list_controller.js sorts
+// them. The rooms someone has hidden, whose level is "invisible", are listed too, for them to open, but
+// their sidebar leaves them out.
 
 /** A row in the sidebar's Rooms: a room shared by name, open or private. */
 export type SharedSidebarRoom = Extract<SidebarRoom, SharedRoom>;
@@ -38,25 +37,22 @@ export function apart(rooms: SidebarRoom[]): { shared: SharedSidebarRoom[]; dire
   return { shared, directs };
 }
 
-const collator = new Intl.Collator();
-
-const byId = (a: Room, b: Room) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-
 /** Each room's place in `order`. */
 const placesIn = (order: RoomId[]) => new Map(order.map((id, place) => [id, place]));
 
 /**
- * `rooms` in the sidebar's order, the rooms in `favorites` first, then the ones `sharedOrder` ranks, each
- * room's places and name worked out once rather than at every comparison.
+ * `rooms`, given in the order someone was put in them, in the sidebar's order: the rooms in `favorites`
+ * first, then the ones `sharedOrder` ranks, then the rest as they're given, each room's places worked
+ * out once rather than at every comparison.
  */
 export function inSidebarOrder<T extends SharedRoom>(rooms: T[], favorites: RoomId[], sharedOrder: RoomId[] = []): T[] {
   const stars = placesIn(favorites);
   const shared = placesIn(sharedOrder);
   return (
     rooms
-      .map((room) => ({ room, star: stars.get(room.id) ?? Infinity, shared: shared.get(room.id) ?? Infinity, name: room.name.toLowerCase() }))
+      .map((room, given) => ({ room, star: stars.get(room.id) ?? Infinity, shared: shared.get(room.id) ?? Infinity, given }))
       // Two rooms that neither ranks are Infinity - Infinity apart, which is NaN, so they go by what's next.
-      .sort((a, b) => a.star - b.star || a.shared - b.shared || collator.compare(a.name, b.name) || byId(a.room, b.room))
+      .sort((a, b) => a.star - b.star || a.shared - b.shared || a.given - b.given)
       .map(({ room }) => room)
   );
 }
@@ -67,16 +63,6 @@ export function inSidebarOrder<T extends SharedRoom>(rooms: T[], favorites: Room
  */
 export function inDirectOrder<T extends DirectSidebarRoom>(directs: T[]): T[] {
   return directs.toReversed().sort((a, b) => (a.activeAt < b.activeAt ? 1 : a.activeAt > b.activeAt ? -1 : 0));
-}
-
-/**
- * The people the sidebar suggests for DMs, of the ones `suggestions` lists, given someone's `rooms` as
- * they are now: everyone but the people in their DMs, as many as `suggestedCount` allows for them, as
- * the server would list them now, but for the people who've joined since it did.
- */
-export function suggestedPeople(suggestions: User[], rooms: SidebarRoom[]): User[] {
-  const inDirects = new Set(rooms.flatMap((room) => (room.kind === "direct" ? room.members.map((member) => member.id) : [])));
-  return suggestions.filter((person) => !inDirects.has(person.id)).slice(0, suggestedCount(inDirects.size));
 }
 
 /**
@@ -98,15 +84,31 @@ export const markedUnread = (room: SidebarRoom, currentRoomId: RoomId | null) =>
 
 /**
  * `rooms` with `room` as it is now, in place of what it was, keeping its mark and level, or last, read
- * and at the level a room starts at, as the room made most recently, which a room someone has just been
- * put in counts as until the list loads again.
+ * and at the level a room starts at, as the room someone was put in most recently, whether it's just
+ * been made or they've just been put in it, which is where the list has it when it loads again.
  * A DM keeps the later of the two times it was last active, since a message can come between the server
  * reading it and its answer arriving.
  */
 export function withRoom(rooms: SidebarRoom[], room: Room): SidebarRoom[] {
   return rooms.some((r) => r.id === room.id)
-    ? rooms.map((r) => (r.id === room.id ? { ...room, ...laterActivity(r, room), unread: r.unread, involvement: r.involvement } : r))
+    ? rooms.map((r) => (r.id === room.id ? { ...room, ...laterActivity(r, room), ...markOf(r), involvement: r.involvement } : r))
     : [...rooms, { ...room, unread: false, involvement: startingInvolvement(room) }];
+}
+
+/** `listed`'s unread mark, and since when, when it's marked. */
+const markOf = ({ unread, unreadSince }: SidebarRoom): Pick<SidebarRoom, "unread" | "unreadSince"> => (unreadSince === undefined ? { unread } : { unread, unreadSince });
+
+/**
+ * `room` marked unread as of `at`, or read when that's null. The server tells of a mark only as it makes
+ * one, so a room marked already takes the new time: the read between them came in the same events as the
+ * message after it, and the server told only of the mark they leave.
+ */
+function marked(room: SidebarRoom, at: string | null): SidebarRoom {
+  if (at === null) {
+    const { unreadSince: _, ...read } = room;
+    return { ...read, unread: false };
+  }
+  return { ...room, unread: true, unreadSince: at };
 }
 
 /** `listed`'s time last active, when it's a DM and that's later than `room`'s. */
@@ -134,7 +136,7 @@ function withHuddle(huddles: Sidebar["huddles"], roomId: RoomId, huddle: LiveHud
 export type RoomChange =
   | { type: "saved"; room: Room }
   | { type: "gone"; roomId: RoomId }
-  | { type: "marked"; roomId: RoomId; unread: boolean }
+  | { type: "marked"; roomId: RoomId; at: string | null }
   | { type: "active"; roomId: RoomId; at: string }
   | { type: "huddle"; roomId: RoomId; huddle: LiveHuddle | null }
   | { type: "involved"; roomId: RoomId; involvement: Involvement }
@@ -159,9 +161,11 @@ export interface RoomListState {
   list: Sidebar | null;
   /** While a list is on its way, the changes made since it was asked for, which it may not show; otherwise null. */
   pending: SidebarChange[] | null;
+  /** Whether the list that came last may have a room in the wrong place, so it's to be asked for again (`putBackIn`). */
+  askAgain: boolean;
 }
 
-export const NO_ROOM_LIST: RoomListState = { list: null, pending: [] };
+export const NO_ROOM_LIST: RoomListState = { list: null, pending: [], askAgain: false };
 
 /** A change, or the list asked for, arriving, or failing to. */
 export type RoomListAction = SidebarChange | { type: "asked" } | { type: "loaded"; list: Sidebar } | { type: "unanswered" };
@@ -178,7 +182,7 @@ function changed(list: Sidebar, change: SidebarChange): Sidebar {
       return { ...list, rooms: list.rooms.filter((room) => room.id !== change.roomId), favorites, huddles: withHuddle(list.huddles, change.roomId, null) };
     }
     case "marked":
-      return { ...list, rooms: list.rooms.map((room) => (room.id === change.roomId ? { ...room, unread: change.unread } : room)) };
+      return { ...list, rooms: list.rooms.map((room) => (room.id === change.roomId ? marked(room, change.at) : room)) };
     case "active":
       return { ...list, rooms: withActivity(list.rooms, change.roomId, change.at) };
     case "huddle":
@@ -198,16 +202,34 @@ function changed(list: Sidebar, change: SidebarChange): Sidebar {
   }
 }
 
+/**
+ * Whether `changes`, made while `list` was on its way, take someone out of a room it lists and put them
+ * back in, which may leave the room in the wrong place, since the list doesn't say which it shows: the
+ * room where it was before they were taken out, which the changes move last, or where it is since they
+ * were put back, which the changes move past any room they were put in after it.
+ */
+function putBackIn(list: Sidebar, changes: SidebarChange[]): boolean {
+  const listed = new Set(list.rooms.map((room) => room.id));
+  const takenOut = new Set<RoomId>();
+  for (const change of changes) {
+    if (change.type === "gone" && listed.has(change.roomId)) takenOut.add(change.roomId);
+    else if (change.type === "saved" && takenOut.has(change.room.id)) return true;
+  }
+  return false;
+}
+
 export function roomListReducer(state: RoomListState, action: RoomListAction): RoomListState {
   switch (action.type) {
     case "asked":
-      return { ...state, pending: [] };
-    case "loaded":
-      return { list: (state.pending ?? []).reduce(changed, action.list), pending: null };
+      return { ...state, pending: [], askAgain: false };
+    case "loaded": {
+      const pending = state.pending ?? [];
+      return { list: pending.reduce(changed, action.list), pending: null, askAgain: putBackIn(action.list, pending) };
+    }
     // When the first list fails to arrive, there are no rooms to show, rather than a list loading for good.
     case "unanswered":
-      return { list: state.list ?? { rooms: [], favorites: { rooms: [], version: 0 }, sharedOrder: [], invitation: null, suggestions: [], huddles: {} }, pending: null };
+      return { list: state.list ?? { rooms: [], favorites: { rooms: [], version: 0 }, sharedOrder: [], invitation: null, huddles: {} }, pending: null, askAgain: false };
     default:
-      return { list: state.list && changed(state.list, action), pending: state.pending && [...state.pending, action] };
+      return { ...state, list: state.list && changed(state.list, action), pending: state.pending && [...state.pending, action] };
   }
 }

@@ -57,6 +57,22 @@ test.describe("Send a message", () => {
   });
 });
 
+test.describe("Keyboard shortcuts", () => {
+  test("lists them on Cmd+/ or Ctrl+/ from the composer, and gives the composer back on Escape", async ({ members }) => {
+    const ada = await members.signIn("Ada");
+    await ada.composer().click();
+    await ada.page.keyboard.press("ControlOrMeta+/");
+    const dialog = ada.page.getByRole("dialog", { name: "Keyboard shortcuts" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("region", { name: "Write a message" })).toContainText("Add a link");
+
+    await ada.page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(ada.composer()).toBeFocused();
+    await expect(ada.composer()).toHaveText("");
+  });
+});
+
 test.describe("See your message before it's saved", () => {
   test("shows your message straight away and settles it when the room confirms", async ({ members }) => {
     let release = () => {};

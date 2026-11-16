@@ -54,8 +54,22 @@
   --auth-error: #b91c1c;
   --auth-error-background: color-mix(in srgb, var(--negative) 8%, var(--background));
   --auth-error-border: color-mix(in srgb, var(--negative) 25%, var(--border));
+  /*
+   * The box General offers a beta to try in, a little red, since a beta is experimental: the negative red at
+   * 6% over the surface, bordered by it at 30% over the border, mixed in whichever mode is on.
+   */
+  --beta-background: color-mix(in srgb, var(--negative) 6%, var(--surface));
+  --beta-border: color-mix(in srgb, var(--negative) 30%, var(--border));
   /* A bot card's `warning` bar: Slack's own amber, since Campfire's --lch-orange is too near the negative red to tell apart. */
   --warning: #daa038;
+  /*
+   * The box an agent's page, or @ember's, asks for care in before what Ember adds around the instructions
+   * is modified: the warning amber at 8% over the surface, bordered by it at 55% over the border, mixed in
+   * whichever mode is on, with its sign in a darker amber, which reads on it in light mode.
+   */
+  --caution-background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  --caution-border: color-mix(in srgb, var(--warning) 55%, var(--border));
+  --caution: oklch(58% 0.13 70);
   /* Campfire's lightbox.css: the image viewer lays --lch-white at 66% over the blurred page. */
   --lightbox: oklch(100% 0 0 / 0.66);
   /* Links in a message: Campfire's --color-link. */
@@ -126,6 +140,7 @@
   --negative: oklch(73.8% 0.184 29.18);
   --auth-error: #fca5a5;
   --warning: oklch(80% 0.14 78);
+  --caution: var(--warning);
   --lightbox: oklch(0% 0 0 / 0.66);
   --link: oklch(72.25% 0.16 248);
   --code-keyword: oklch(73.45% 0.16260514269909043 25.78369140372489);
@@ -386,7 +401,12 @@
   --color-auth-error: var(--auth-error);
   --color-auth-error-background: var(--auth-error-background);
   --color-auth-error-border: var(--auth-error-border);
+  --color-beta-background: var(--beta-background);
+  --color-beta-border: var(--beta-border);
   --color-warning: var(--warning);
+  --color-caution: var(--caution);
+  --color-caution-background: var(--caution-background);
+  --color-caution-border: var(--caution-border);
   --color-lightbox: var(--lightbox);
   --color-dialog-backdrop: var(--dialog-backdrop);
   --color-dialog-shadow: var(--dialog-shadow);

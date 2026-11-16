@@ -88,6 +88,22 @@ function DaySeparator({ at }: { at: string }) {
   );
 }
 
+/**
+ * The New line, over the first message that came while the room was marked unread: in the negative red,
+ * with its word at the end.
+ */
+function NewSeparator() {
+  return (
+    <div
+      role="separator"
+      aria-label="New messages"
+      className="mb-1.5 flex items-center gap-2 text-xs leading-4 font-bold text-negative before:flex-1 before:border-t before:border-negative"
+    >
+      <span aria-hidden="true">New</span>
+    </div>
+  );
+}
+
 interface Props {
   /** The room's name as the reader reads it, which a DM's names the others in it. */
   roomName: string;
@@ -117,6 +133,11 @@ interface Props {
   thread?: { header: ReactNode; place: ThreadPlace };
   /** The message whose thread is open beside the room. */
   openThread?: string;
+  /**
+   * When the room was marked unread as of, as it was opened: the first message from someone else that came
+   * since gets the New line, unless the messages loaded may not reach back to it.
+   */
+  newSince?: string | null;
 }
 
 /**
@@ -124,7 +145,7 @@ interface Props {
  * else, it keeps the reader's place, loads the pages before and after as they near either end, and
  * offers Jump to newest message when new ones come.
  */
-export function MessageList({ roomName, direct = false, invitation, onDismissInvitation, state, me, actions, editing, editors, onLoadOlder, onLoadNewer, onJumpToNewest, onDropFiles = () => {}, thread, openThread }: Props) {
+export function MessageList({ roomName, direct = false, invitation, onDismissInvitation, state, me, actions, editing, editors, onLoadOlder, onLoadNewer, onJumpToNewest, onDropFiles = () => {}, thread, openThread, newSince = null }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const top = useRef<HTMLDivElement>(null);
@@ -144,6 +165,10 @@ export function MessageList({ roomName, direct = false, invitation, onDismissInv
   const [drawnAll, setDrawnAll] = useState(false);
   const items = timeline(state.messages);
   const newestFirst = !drawnAll && !state.focus?.messageId && items.length > FIRST_DRAWN;
+  const firstNew = newSince === null ? -1 : items.findIndex(({ message }) => message.createdAt >= newSince && message.creator.id !== me.id);
+  // A page that doesn't reach back before `newSince` may have older new messages before it that aren't loaded yet,
+  // whoever wrote its first one.
+  const newLineAt = firstNew === -1 || (state.hasMore && items[0]!.message.createdAt >= newSince!) ? null : items[firstNew]!.message;
 
   const nearEnd = (el: HTMLElement) => !state.hasNewer && el.scrollHeight - el.scrollTop - el.clientHeight <= AT_END_PX;
 
@@ -313,6 +338,7 @@ export function MessageList({ roomName, direct = false, invitation, onDismissInv
                     <div key={key} data-row={key} data-message-id={message.id}>
                       {/* A thread's replies start under its message, without a day's heading between them. */}
                       {firstOfDay && (!thread || message !== items[0]!.message) && <DaySeparator at={message.createdAt} />}
+                      {message === newLineAt && <NewSeparator />}
                       <MessageItem
                         message={message}
                         me={me}

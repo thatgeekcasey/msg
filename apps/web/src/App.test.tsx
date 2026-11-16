@@ -2,7 +2,10 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CloseCode, EMAIL_LINK_GONE, SIGN_IN_REJECTED, type Account, type AccountChanges, type Bootstrap, type Message, type WorkspaceSettings } from "@ember/protocol";
+import type { HuddlesSetup } from "@ember/protocol/huddles";
+import { QUESTION } from "@/components/setup-huddles";
 import { flashOnNextPage } from "@/lib/flash";
+import { showHuddle } from "@/lib/huddle-store";
 import { loadPage } from "@/lib/page";
 import { setPrefersDark } from "@/test-media";
 import { CHROME_MAC } from "@/test-platforms";
@@ -22,7 +25,7 @@ const EMAIL_LINK_TOKEN = "Gr-_em".repeat(7) + "D";
 /** Where joining with Ada's email address sends the browser. */
 const ADA_SIGNS_IN = "/session/new?email_address=ada%40example.com";
 /** The workspace as it's set up. */
-const EMBER: Account = { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false };
+const EMBER: Account = { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false, huddleCameras: true, huddleScreens: true };
 /** What the deployment's Set up Ember form suggests. */
 const PLACEHOLDERS = { name: "Grace Hopper", emailAddress: "grace@example.com" };
 const general = { id: "general", name: "general", kind: "open", icon: null };
@@ -164,6 +167,7 @@ function serve({
     }
     if (!signedIn) return Response.json({ error: "Not signed in" }, { status: 401 });
     if (route === "GET /api/me") return Response.json({ user: me });
+    if (route === "POST /api/outside/asks") return Response.json({ name: "Claude", comesBackTo: "claude.example", workspace: account.name, scopes: ["read"] });
     if (route === "GET /api/account")
       return Response.json({
         account,
@@ -171,17 +175,24 @@ function serve({
         canAdminister: me.administrator,
         memberfulSite: null,
         memberfulWebhooks: false,
+        memberfulKeys: null,
+        memberfulSiteKept: null,
         turnstile: null,
         assistant: null,
         huddles: null,
+        outsideAi: false,
         cloudflareAccountId: null,
         email: { provider: "cloudflare", resendKey: null, cloudflare: true, from: null },
         invitations: [],
         emailDomains: [],
         addresses: { deployed: null, others: [] },
       } satisfies WorkspaceSettings);
+    if (route === "PUT /api/account/huddles") {
+      account = { ...account, huddles: true };
+      return Response.json({ huddles: { appId: (JSON.parse(String(init?.body)) as HuddlesSetup).appId, relayKeyId: null } });
+    }
     if (route === "GET /api/users") return Response.json({ users: [] });
-    if (route === "GET /api/users/me/profile") return Response.json({ profile: { name: me.name, emailAddress: null, bio: null } });
+    if (route === "GET /api/users/me/profile") return Response.json({ profile: { name: me.name, emailAddress: null, bio: null, apps: [], outsideAi: null } });
     if (route === "PATCH /api/account") {
       const { name = account.name, tagline = account.tagline, settings, customDomain = account.customDomain } = JSON.parse(String(init?.body)) as AccountChanges;
       account = { ...account, name, tagline, hideTranslationButtons: settings?.hideTranslationButtons ?? account.hideTranslationButtons, customDomain };
@@ -212,6 +223,8 @@ async function roomSocket(): Promise<RoomSocket> {
   return RoomSocket.all[0]!;
 }
 const signInPage = () => screen.findByRole("heading", { name: "Sign in to Ember" });
+/** What first run asks about huddles, once the workspace is made, before it opens Ember. */
+const huddlesQuestion = () => screen.findByRole("heading", { level: 1, name: QUESTION });
 
 async function signInAsAda(password = "correct horse") {
   const user = userEvent.setup();
@@ -249,9 +262,9 @@ describe("Set up the workspace", () => {
     expect(screen.queryByRole("heading")).not.toBeInTheDocument();
   });
 
-  it("sets up Ember at /first_run, then opens general signed in as its administrator", async () => {
+  it("sets up Ember at /first_run, asks about huddles, then opens general signed in as its administrator", async () => {
     history.replaceState(null, "", "/first_run");
-    serve({ signedIn: false, setup: "pending" });
+    const fetch = serve({ signedIn: false, setup: "pending" });
     render(<App />);
     const user = userEvent.setup();
     const name = await screen.findByLabelText("Name");
@@ -262,10 +275,54 @@ describe("Set up the workspace", () => {
     await user.type(screen.getByLabelText("Email address"), "ada@example.com");
     await user.type(screen.getByLabelText("Password"), "correct horse{Enter}");
 
+    // The question comes before Ember opens, still at setup's address. Its title takes focus in an effect, just after it shows.
+    const question = await huddlesQuestion();
+    await waitFor(() => expect(question).toHaveFocus());
+    expect(location.pathname).toBe("/first_run");
+    await user.click(screen.getByRole("button", { name: "Not now" }));
+
     expect(await screen.findByRole("heading", { level: 1, name: "general" })).toBeInTheDocument();
     expect(location.pathname).toBe("/rooms/r1");
     expect(screen.getAllByRole("link", { name: "Your profile" })[0]).toHaveAttribute("title", "Ada");
+    expect(fetch.mock.calls.some(([path]) => path === "/api/account/huddles")).toBe(false);
     expect(loadPage).not.toHaveBeenCalled();
+  });
+
+  it("turns huddles on as Ember is set up, with an SFU app's keys, which gives general's header its huddle button", async () => {
+    WorkspaceSocket.all = [];
+    vi.stubGlobal("WebSocket", WorkspaceSocket);
+    history.replaceState(null, "", "/first_run");
+    const fetch = serve({ signedIn: false, setup: "pending" });
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Name"), "Ada");
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct horse{Enter}");
+
+    await huddlesQuestion();
+    await user.click(screen.getByRole("button", { name: "Set up huddles" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Set up huddles" })).toHaveFocus();
+    const app = { appId: "ca11".repeat(8), appSecret: "5ec7".repeat(16) };
+    await user.type(screen.getByRole("textbox", { name: "App ID" }), app.appId);
+    await user.type(screen.getByRole("textbox", { name: "App Secret" }), app.appSecret);
+    await user.click(screen.getByRole("button", { name: "Save and continue" }));
+
+    const on = await screen.findByRole("heading", { level: 1, name: "Huddles are on" });
+    await waitFor(() => expect(on).toHaveFocus());
+    const [, saved] = fetch.mock.calls.find(([path]) => path === "/api/account/huddles")!;
+    expect([saved!.method, JSON.parse(String(saved!.body))]).toEqual(["PUT", app]);
+    // Nothing has opened Ember yet.
+    expect(location.pathname).toBe("/first_run");
+    expect(WorkspaceSocket.all).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Open Ember" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "general" })).toBeInTheDocument();
+    expect(location.pathname).toBe("/rooms/r1");
+    // The workspace says huddles are on as its socket connects.
+    expect(screen.queryByRole("button", { name: "Start huddle" })).not.toBeInTheDocument();
+    await waitFor(() => expect(WorkspaceSocket.all).toHaveLength(1));
+    act(() => WorkspaceSocket.all[0]!.welcome(ada, { ...EMBER, huddles: true }));
+    expect(screen.getByRole("button", { name: "Start huddle" })).toBeInTheDocument();
   });
 
   it("sets up Ember through its setup link, sending the link's token and taking it out of the address", async () => {
@@ -281,6 +338,8 @@ describe("Set up the workspace", () => {
     await user.type(name, "Ada");
     await user.type(screen.getByLabelText("Email address"), "ada@example.com");
     await user.type(screen.getByLabelText("Password"), "correct horse{Enter}");
+    await huddlesQuestion();
+    await user.click(screen.getByRole("button", { name: "Not now" }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "general" })).toBeInTheDocument();
     const [, init] = fetch.mock.calls.find(([path, init]) => path === "/api/first_run" && init?.method === "POST")!;
@@ -692,6 +751,53 @@ describe("Huddles", () => {
     act(() => WorkspaceSocket.all[0]!.receive({ type: "account.updated", account: EMBER }));
     expect(huddleButton()).not.toBeInTheDocument();
   });
+
+  it("takes the camera's switch from the preview a huddle starts from, and gives it back, as the workspace socket says cameras go off and on", async () => {
+    const withHuddles = { ...EMBER, huddles: true };
+    const cameraSwitch = () => screen.queryByRole("button", { name: "Turn on camera" });
+    WorkspaceSocket.all = [];
+    vi.stubGlobal("WebSocket", WorkspaceSocket);
+    serve({ signedIn: true, account: withHuddles });
+    render(<App />);
+    await roomHeading();
+    await waitFor(() => expect(WorkspaceSocket.all).toHaveLength(1));
+    act(() => WorkspaceSocket.all[0]!.welcome(ada, withHuddles));
+    await userEvent.setup().click(huddleButton()!);
+    expect(await screen.findByRole("dialog", { name: "Start a huddle in general" })).toBeInTheDocument();
+    expect(cameraSwitch()).toBeInTheDocument();
+
+    act(() => WorkspaceSocket.all[0]!.receive({ type: "account.updated", account: { ...withHuddles, huddleCameras: false } }));
+    expect(cameraSwitch()).not.toBeInTheDocument();
+    act(() => WorkspaceSocket.all[0]!.receive({ type: "account.updated", account: withHuddles }));
+    expect(cameraSwitch()).toBeInTheDocument();
+  });
+
+  it("takes the button that shares a screen from the bar of a huddle, and gives it back, as the workspace socket says screen sharing goes off and on", async () => {
+    const withHuddles = { ...EMBER, huddles: true };
+    const shareButton = () => screen.queryByRole("button", { name: "Share screen" });
+    // A browser that can share a screen, which jsdom's isn't.
+    Object.defineProperty(navigator, "mediaDevices", { value: { getDisplayMedia: vi.fn() }, configurable: true });
+    WorkspaceSocket.all = [];
+    vi.stubGlobal("WebSocket", WorkspaceSocket);
+    serve({ signedIn: true, account: withHuddles });
+    render(<App />);
+    await roomHeading();
+    await waitFor(() => expect(WorkspaceSocket.all).toHaveLength(1));
+    act(() => WorkspaceSocket.all[0]!.welcome(ada, withHuddles));
+    // The tab is in general's huddle, minimized to its bar.
+    const controls = { leave: () => showHuddle(null), setMuted: vi.fn(), setCamera: vi.fn(), setScreen: vi.fn(), setOpen: vi.fn(), setDevice: vi.fn(), setSmall: vi.fn(), switchCamera: vi.fn() };
+    act(() => showHuddle({ roomId: "general", connected: true, you: ada, people: [], muted: false, microphone: true, microphoneId: "", speakerId: "", camera: null, watched: new Map(), screen: null, screens: new Map(), open: false }, controls));
+    try {
+      expect(shareButton()).toBeInTheDocument();
+      act(() => WorkspaceSocket.all[0]!.receive({ type: "account.updated", account: { ...withHuddles, huddleScreens: false } }));
+      expect(shareButton()).not.toBeInTheDocument();
+      act(() => WorkspaceSocket.all[0]!.receive({ type: "account.updated", account: withHuddles }));
+      expect(shareButton()).toBeInTheDocument();
+    } finally {
+      act(() => showHuddle(null));
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+  });
 });
 
 describe("Workspace logo", () => {
@@ -975,6 +1081,30 @@ describe("Reset a forgotten password with an emailed code", () => {
     render(<App />);
     expect(await resetPage()).toBeInTheDocument();
     expect(sessionStorage.getItem("ember:return-to")).toBe("/rooms/general");
+  });
+});
+
+describe("Connecting an AI app", () => {
+  const REQUEST = "/oauth/authorize?response_type=code&client_id=0mgk3x2a9b4c70&state=5f2c01";
+
+  it("asks whether to connect the app whose request the address carries, in place of the workspace", async () => {
+    history.replaceState(null, "", REQUEST);
+    const fetch = serve({ signedIn: true });
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect Claude to Ember?" })).toBeVisible();
+    expect(fetch).toHaveBeenCalledWith("/api/outside/asks", expect.objectContaining({ method: "POST" }));
+    expect(screen.queryAllByRole("link", { name: "Your profile" })).toEqual([]);
+    expect(`${location.pathname}${location.search}`).toBe(REQUEST);
+  });
+
+  it("has someone signed out sign in first, and comes back to the request", async () => {
+    history.replaceState(null, "", REQUEST);
+    serve({ signedIn: false });
+    render(<App />);
+    await signInPage();
+    await signInAsAda();
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect Claude to Ember?" })).toBeVisible();
+    expect(`${location.pathname}${location.search}`).toBe(REQUEST);
   });
 });
 

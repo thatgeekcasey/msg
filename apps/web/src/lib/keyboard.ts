@@ -2,7 +2,7 @@
 export const hasTouchKeyboard = () => matchMedia("(pointer: coarse)").matches;
 
 /** Whether the keyboard is an Apple device's, whose shortcuts take Cmd where others take Ctrl. */
-const appleKeyboard = () => /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+export const appleKeyboard = () => /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 /** Whether Cmd is held and Ctrl isn't on an Apple keyboard, or Ctrl and not Cmd on any other. */
 const commandHeld = (event: KeyboardEvent) => (appleKeyboard() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
@@ -14,6 +14,15 @@ const commandHeld = (event: KeyboardEvent) => (appleKeyboard() ? event.metaKey &
  */
 export function opensFind(event: KeyboardEvent): boolean {
   if (event.key.toLowerCase() !== "f" || event.altKey || event.shiftKey || event.isComposing) return false;
+  return commandHeld(event);
+}
+
+/**
+ * Cmd+/ on a Mac, iPad or iPhone, or Ctrl+/ elsewhere, which opens the list of keyboard shortcuts,
+ * from the composer too.
+ */
+export function opensShortcuts(event: KeyboardEvent): boolean {
+  if ((event.key !== "/" && event.code !== "Slash") || event.altKey || event.shiftKey || event.isComposing) return false;
   return commandHeld(event);
 }
 
@@ -41,12 +50,12 @@ export interface Shortcut {
 }
 
 /** The keys `togglesHuddle` takes on this keyboard. */
-export const huddleShortcut = (): Shortcut =>
-  appleKeyboard() ? { keys: ["⌘", "⌥", "⇧", "H"], aria: "Meta+Alt+Shift+H" } : { keys: ["Ctrl", "Alt", "Shift", "H"], aria: "Control+Alt+Shift+H" };
+export const huddleShortcut = (apple = appleKeyboard()): Shortcut =>
+  apple ? { keys: ["⌘", "⌥", "⇧", "H"], aria: "Meta+Alt+Shift+H" } : { keys: ["Ctrl", "Alt", "Shift", "H"], aria: "Control+Alt+Shift+H" };
 
 /** The keys `togglesMute` takes on this keyboard. */
-export const muteShortcut = (): Shortcut =>
-  appleKeyboard() ? { keys: ["⌘", "⇧", "Space"], aria: "Meta+Shift+Space" } : { keys: ["Ctrl", "Shift", "Space"], aria: "Control+Shift+Space" };
+export const muteShortcut = (apple = appleKeyboard()): Shortcut =>
+  apple ? { keys: ["⌘", "⇧", "Space"], aria: "Meta+Shift+Space" } : { keys: ["Ctrl", "Shift", "Space"], aria: "Control+Shift+Space" };
 
 /** Ctrl+K, or Cmd+K on a Mac, which opens the Link field of Lexxy's toolbar (its `data-hotkey="cmd+k ctrl+k"`). */
 export function opensLink(event: KeyboardEvent): boolean {
@@ -80,3 +89,55 @@ export function savesEdit(event: KeyboardEvent): boolean {
 export function pressedAlone(event: KeyboardEvent, key: string): boolean {
   return event.key === key && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
 }
+
+/** A row of the keyboard shortcuts dialog: what a key does, and the keys, as an Apple keyboard or another names them. */
+export interface ShortcutRow {
+  action: string;
+  keys: (apple: boolean) => string[];
+}
+
+/** Cmd on an Apple keyboard, Ctrl on another. */
+const command = (apple: boolean) => (apple ? "⌘" : "Ctrl");
+/** Option on an Apple keyboard, Alt on another. */
+const option = (apple: boolean) => (apple ? "⌥" : "Alt");
+/** Shift, as each keyboard names it. */
+const shift = (apple: boolean) => (apple ? "⇧" : "Shift");
+
+/**
+ * What the keyboard shortcuts dialog lists, a group at a time: each key the matchers here take, so a
+ * shortcut added to them is listed beside them.
+ */
+export const SHORTCUTS: { group: string; rows: ShortcutRow[] }[] = [
+  {
+    group: "Navigate",
+    rows: [
+      { action: "Search", keys: (apple) => [command(apple), "F"] },
+      { action: "Move a starred room up or down", keys: (apple) => [option(apple), "↑ ↓"] },
+      { action: "Show keyboard shortcuts", keys: (apple) => [command(apple), "/"] },
+    ],
+  },
+  {
+    group: "Huddles",
+    rows: [
+      { action: "Start, join or leave a huddle", keys: (apple) => huddleShortcut(apple).keys },
+      { action: "Mute or unmute", keys: (apple) => muteShortcut(apple).keys },
+    ],
+  },
+  {
+    group: "Write a message",
+    rows: [
+      { action: "Send", keys: () => ["Enter"] },
+      { action: "Send with the formatting toolbar open, or on a touch screen", keys: (apple) => [command(apple), "Enter"] },
+      { action: "Start a new line", keys: (apple) => [shift(apple), "Enter"] },
+      { action: "Add a link", keys: (apple) => [command(apple), "K"] },
+      { action: "Edit your last message, with nothing written", keys: () => ["↑"] },
+    ],
+  },
+  {
+    group: "Edit a message",
+    rows: [
+      { action: "Save", keys: (apple) => [command(apple), "Enter"] },
+      { action: "Close", keys: () => ["Esc"] },
+    ],
+  },
+];

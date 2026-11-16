@@ -9,10 +9,13 @@ import { apiWith, connect, freshRoom, objectSql, post, roomSql, roomStub, search
 
 /** The tables each kind of object keeps. A migration's new tables go under the scope it names. */
 const TABLES: Record<Exclude<Scope, "search">, string[]> = {
-  room: ["blobs", "boosts", "message_deletions", "messages", "revocations", "room_events", "unindexed_messages"],
+  room: ["blobs", "boosts", "message_deletions", "messages", "revocations", "room_events", "unindexed_messages", "waiting_calls"],
   workspace: [
     "accounts",
+    "agent_tools",
     "agents",
+    "app_sign_ins",
+    "apps",
     "bans",
     "deleted_rooms",
     "email_link_requests",
@@ -22,6 +25,10 @@ const TABLES: Record<Exclude<Scope, "search">, string[]> = {
     "membership_catch_ups",
     "membership_checks",
     "memberships",
+    "outside_clients",
+    "outside_connections",
+    "outside_spent_tokens",
+    "own_app_sign_ins",
     "password_resets",
     "pending_identities",
     "pending_picture_deletions",
@@ -245,6 +252,52 @@ describe("Durable Object SQLite or D1", () => {
       row("u2", "laptop", "lin"),
     ]);
     expect(again).toMatch(/UNIQUE constraint failed: push_subscriptions.user_id, push_subscriptions.endpoint/);
+  });
+
+  it("puts each active person in the open rooms made or opened while they were banned, before lifting a ban did, leaving bots and anyone not active out", async () => {
+    // D1 runs the same SQL, at setup, with nobody to put anywhere.
+    if (sharedD1()) return;
+    // A new room's storage stands in for a Workspace's from before, since a Workspace migrates as it opens.
+    const room = await freshRoom("unbanned-open-rooms");
+    const memberships = await runInDurableObject(roomStub(room), (_room, state: DurableObjectState) => {
+      state.storage.sql.exec("CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)");
+      for (const { name, sql } of MIGRATIONS.filter(({ scope, name }) => scope === "workspace" && name < "0053")) {
+        state.storage.sql.exec(sql);
+        state.storage.sql.exec("INSERT INTO d1_migrations (name) VALUES (?)", name);
+      }
+      // Grace's ban was lifted once Launch was made, and so was Visitor's, a guest's. Lin is suspended,
+      // Linus banned and Former removed; Recap is an agent kept to general, and Build Bot a bot.
+      state.storage.sql.exec(`INSERT INTO users (id, name, role, status, guest, created_at, updated_at) VALUES
+        ('ada', 'Ada', 1, 0, 0, 'now', 'now'), ('grace', 'Grace', 0, 0, 0, 'now', 'now'), ('visitor', 'Visitor', 0, 0, 1, 'now', 'now'),
+        ('lin', 'Lin', 0, 3, 0, 'now', 'now'), ('linus', 'Linus', 0, 2, 0, 'now', 'now'), ('former', 'Former', 0, 1, 0, 'now', 'now'),
+        ('recap', 'Recap', 2, 0, 0, 'now', 'now'), ('robot', 'Build Bot', 2, 0, 0, 'now', 'now')`);
+      state.storage.sql.exec(`INSERT INTO agents (user_id, description, instructions, model, model_name, format, thinking,
+          answer_length, every_open_room, created_by, updated_by, created_at, updated_at)
+        VALUES ('recap', 'Recaps', '', 'model', 'Model', 'messages', 'off', 'short', 0, 'ada', 'ada', 'now', 'now')`);
+      state.storage.sql.exec(`INSERT INTO rooms (id, kind, name, created_at, updated_at) VALUES
+        ('general', 'open', 'general', 'now', 'now'), ('launch', 'open', 'Launch', 'now', 'now'), ('leads', 'closed', 'Leads', 'now', 'now')`);
+      const join = (roomId: string, userId: string) =>
+        state.storage.sql.exec("INSERT INTO memberships (room_id, user_id, created_at, updated_at) VALUES (?, ?, 'before', 'before')", roomId, userId);
+      for (const userId of ["ada", "grace", "visitor", "lin", "linus", "recap"]) join("general", userId);
+      join("launch", "ada");
+      join("leads", "ada");
+      migrate(state.storage, "workspace");
+      return state.storage.sql.exec("SELECT room_id, user_id, created_at, updated_at FROM memberships ORDER BY user_id, room_id").toArray();
+    });
+    const kept = (room_id: string, user_id: string) => ({ room_id, user_id, created_at: "before", updated_at: "before" });
+    const now = expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/) as string;
+    expect(memberships).toEqual([
+      kept("general", "ada"),
+      kept("launch", "ada"),
+      kept("leads", "ada"),
+      kept("general", "grace"),
+      { room_id: "launch", user_id: "grace", created_at: now, updated_at: now },
+      kept("general", "lin"),
+      kept("general", "linus"),
+      kept("general", "recap"),
+      kept("general", "visitor"),
+      { room_id: "launch", user_id: "visitor", created_at: now, updated_at: now },
+    ]);
   });
 
   it("runs a batch as one transaction: if a statement fails, the ones before it are undone", async () => {

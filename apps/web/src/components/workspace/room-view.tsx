@@ -42,6 +42,8 @@ interface Props {
   onStarred: (favorites: Favorites) => void;
   /** This person's notification level in the room. */
   involvement: Involvement;
+  /** When the room was marked unread as of when it was opened, which the timeline draws a New line at, or null. */
+  newSince?: string | null;
   /** Called as its bell saves this person's level in the room, with what gives the room the level the server answers. */
   askForRoom: () => (answer: RoomAnswer) => void;
   onSessionChanged: (me: Me | null) => void;
@@ -57,7 +59,7 @@ export interface RoomViewHandle {
   focusComposer(): void;
 }
 
-export function RoomView({ room, messageId, threadId, replyId, invitation, onDismissInvitation, me, favorite, gone, onStarred, involvement, askForRoom, onSessionChanged, onFailed, onGone, ref }: Props) {
+export function RoomView({ room, messageId, threadId, replyId, invitation, onDismissInvitation, me, favorite, gone, onStarred, involvement, newSince = null, askForRoom, onSessionChanged, onFailed, onGone, ref }: Props) {
   const { state, frames, postMessage, postFiles, typing, loadOlder, loadNewer, jump, messageActions, dismissNotice } = useRoom(room.id, me, onSessionChanged, messageId);
   const nameOf = useNameOf();
   const name = roomName(room, me.id, nameOf);
@@ -110,6 +112,7 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
         <RoomHeader
           room={room}
           name={name}
+          meId={me.id}
           present={state.present}
           status={state.status}
           offline={state.offline}
@@ -138,6 +141,7 @@ export function RoomView({ room, messageId, threadId, replyId, invitation, onDis
             onJumpToNewest={() => jump(null)}
             onDropFiles={(files) => composer.current?.addFiles(files)}
             openThread={threadId}
+            newSince={newSince}
           />
           {deleted ? (
             <RoomDeleted />

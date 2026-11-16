@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { huddleShortcut, muteShortcut, opensFind, opensLink, pressedAlone, savesEdit, sendsMessage, togglesHuddle, togglesMute } from "./keyboard";
+import { huddleShortcut, muteShortcut, opensFind, opensLink, opensShortcuts, SHORTCUTS, pressedAlone, savesEdit, sendsMessage, togglesHuddle, togglesMute } from "./keyboard";
 
 function pointer(coarse: boolean) {
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)" && coarse }));
@@ -190,5 +190,49 @@ describe("togglesMute", () => {
     expect(muteShortcut()).toEqual({ keys: ["⌘", "⇧", "Space"], aria: "Meta+Shift+Space" });
     on("Linux x86_64");
     expect(muteShortcut()).toEqual({ keys: ["Ctrl", "Shift", "Space"], aria: "Control+Shift+Space" });
+  });
+});
+
+describe("opensShortcuts", () => {
+  it("takes Ctrl+/, but on Apple's devices, which take Cmd+/", () => {
+    on("Win32");
+    expect(opensShortcuts(press("/", { ctrlKey: true }))).toBe(true);
+    expect(opensShortcuts(press("/", { metaKey: true }))).toBe(false);
+    for (const platform of ["MacIntel", "iPad", "iPhone"]) {
+      on(platform);
+      expect(opensShortcuts(press("/", { metaKey: true })), platform).toBe(true);
+      expect(opensShortcuts(press("/", { ctrlKey: true })), platform).toBe(false);
+    }
+  });
+
+  it("counts the key by where it is, for keyboards whose / is somewhere else", () => {
+    on("Linux x86_64");
+    expect(opensShortcuts(press("-", { code: "Slash", ctrlKey: true }))).toBe(true);
+  });
+
+  it("leaves / alone, with other modifiers, or while an input method composes", () => {
+    on("Win32");
+    expect(opensShortcuts(press("/"))).toBe(false);
+    for (const modifier of ["altKey", "shiftKey", "metaKey", "isComposing"]) {
+      expect(opensShortcuts(press("/", { ctrlKey: true, [modifier]: true })), modifier).toBe(false);
+    }
+    expect(opensShortcuts(press("?", { ctrlKey: true }))).toBe(false);
+  });
+});
+
+describe("SHORTCUTS", () => {
+  it("names Cmd and Option on an Apple keyboard, and Ctrl and Alt on another", () => {
+    const keys = (apple: boolean) => SHORTCUTS.flatMap(({ rows }) => rows.flatMap((row) => row.keys(apple)));
+    expect(keys(true)).toContain("⌘");
+    expect(keys(true)).not.toContain("Ctrl");
+    expect(keys(false)).toContain("Ctrl");
+    expect(keys(false)).not.toContain("⌘");
+    expect(keys(false)).not.toContain("⌥");
+  });
+
+  it("lists the huddle keys as their buttons' tooltips show them", () => {
+    const huddles = SHORTCUTS.find(({ group }) => group === "Huddles")!.rows;
+    expect(huddles.map((row) => row.keys(true))).toEqual([huddleShortcut(true).keys, muteShortcut(true).keys]);
+    expect(huddles.map((row) => row.keys(false))).toEqual([huddleShortcut(false).keys, muteShortcut(false).keys]);
   });
 });

@@ -14,6 +14,7 @@ const ON: Assistant = {
   most: TOP_LEVELS,
   webTools: null,
   instructions: "",
+  promptTemplate: null,
   avatarUrl: "/users/ember.abc/avatar?v=20261101120000",
   avatar: false,
 };

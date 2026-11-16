@@ -87,7 +87,7 @@ const scrollTo = (log: HTMLElement, top: number) => {
 };
 
 const ada: Me = { id: "u1", name: "Ada", administrator: false };
-const actions = { boost: vi.fn(), unboost: vi.fn(), edit: vi.fn(), remove: vi.fn() };
+const actions = { boost: vi.fn(), unboost: vi.fn(), edit: vi.fn(), remove: vi.fn(), click: vi.fn() };
 const editors = { open: vi.fn(), close: vi.fn(), returnFocus: vi.fn(), attach: vi.fn(), reply: vi.fn() };
 
 /** Messages from Ada named m`from` to m`to`. */
@@ -338,7 +338,7 @@ describe("Welcome and invite card", () => {
 
 describe("Sign in with Memberful", () => {
   it("shows no welcome card while Memberful is members only, since its join link is off", () => {
-    const account = { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: true, memberfulSignIn: true, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false };
+    const account = { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: true, memberfulSignIn: true, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false, huddleCameras: true, huddleScreens: true };
     render(<AccountContext value={account}>{list({ messages: [], paged: false }, vi.fn(), { roomId: "general", joinCode: "aB3d-Ef5h-iJ7k" })}</AccountContext>);
     expect(screen.queryByRole("heading", { name: "Welcome to Ember" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Welcome to #general" })).toBeInTheDocument();
@@ -347,7 +347,7 @@ describe("Sign in with Memberful", () => {
 
 describe("Ways to join", () => {
   it("shows no welcome card while the join link is off, but shows it again once it's on", () => {
-    const account = { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: false, openSignUp: true, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false };
+    const account = { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: false, openSignUp: true, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false, huddleCameras: true, huddleScreens: true };
     const welcome = (joinLink: boolean) => <AccountContext value={{ ...account, joinLink }}>{list({ messages: [], paged: false }, vi.fn(), { roomId: "general", joinCode: "aB3d-Ef5h-iJ7k" })}</AccountContext>;
     const { rerender } = render(welcome(false));
     expect(screen.queryByRole("heading", { name: "Welcome to Ember" })).not.toBeInTheDocument();
@@ -362,6 +362,50 @@ describe("Day separators", () => {
     const days = screen.getAllByRole("heading", { level: 2 });
     expect(days.map((day) => day.textContent)).toEqual(["October 10, 2026", "October 11, 2026"]);
     expect(days[1]!.querySelector("time")).toHaveAttribute("title", "10/11/26, 9:00 AM");
+  });
+});
+
+describe("New line", () => {
+  const grace = { id: "u2", name: "Grace" };
+  /** A message from Grace, named by its id. */
+  const from = (id: string, createdAt: string): Message => ({ ...message(id, createdAt), creator: grace });
+  const timeline = [message("Earlier", "2026-10-12T09:00:00.000Z"), from("Before", "2026-10-12T09:30:00.000Z"), message("Mine", "2026-10-12T10:00:00.000Z"), from("First new", "2026-10-12T10:05:00.000Z"), from("Second new", "2026-10-12T10:06:00.000Z")];
+  const newLine = () => screen.queryByRole("separator", { name: "New messages" });
+  /** The id of the message the New line is over. */
+  const newLineOver = () => newLine()?.closest("[data-message-id]")?.getAttribute("data-message-id");
+
+  it("draws New over the first message someone else wrote since the room was marked unread", () => {
+    render(list({ messages: timeline }, vi.fn(), null, { newSince: "2026-10-12T10:00:00.000Z" }));
+    expect(screen.getAllByRole("separator", { name: "New messages" })).toHaveLength(1);
+    expect(newLineOver()).toBe("First new");
+    expect(newLine()).toHaveTextContent("New");
+  });
+
+  it("draws none in a room that wasn't marked unread, or for only the reader's own messages since", () => {
+    const { rerender } = render(list({ messages: timeline }));
+    expect(newLine()).not.toBeInTheDocument();
+    rerender(list({ messages: timeline.slice(0, 3) }, vi.fn(), null, { newSince: "2026-10-12T10:00:00.000Z" }));
+    expect(newLine()).not.toBeInTheDocument();
+  });
+
+  it("keeps the line where it was as more messages come", () => {
+    const { rerender } = render(list({ messages: timeline }, vi.fn(), null, { newSince: "2026-10-12T10:00:00.000Z" }));
+    rerender(list({ messages: [...timeline, from("Third new", "2026-10-12T10:07:00.000Z")] }, vi.fn(), null, { newSince: "2026-10-12T10:00:00.000Z" }));
+    expect(newLineOver()).toBe("First new");
+  });
+
+  it("draws none over the first message loaded when older new ones may not be loaded yet", () => {
+    const { rerender } = render(list({ messages: timeline.slice(3), hasMore: true }, vi.fn(), null, { newSince: "2026-10-12T10:00:00.000Z" }));
+    expect(newLine()).not.toBeInTheDocument();
+    rerender(list({ messages: timeline.slice(3), hasMore: false }, vi.fn(), null, { newSince: "2026-10-12T10:00:00.000Z" }));
+    expect(newLineOver()).toBe("First new");
+  });
+
+  it("draws none when the first message loaded is the reader's own, sent since, and older ones may not be loaded yet", () => {
+    const { rerender } = render(list({ messages: timeline.slice(2), hasMore: true }, vi.fn(), null, { newSince: "2026-10-12T09:45:00.000Z" }));
+    expect(newLine()).not.toBeInTheDocument();
+    rerender(list({ messages: timeline.slice(2), hasMore: false }, vi.fn(), null, { newSince: "2026-10-12T09:45:00.000Z" }));
+    expect(newLineOver()).toBe("First new");
   });
 });
 

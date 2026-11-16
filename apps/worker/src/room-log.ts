@@ -11,8 +11,9 @@ export interface RoomEvent {
   /** Its place in the room's log, whose numbers only grow. */
   seq: number;
   /**
-   * A new message, a bot's reply to a webhook delivery, which is a new message that's never delivered to
-   * bots' webhooks in turn, or someone opening the room in a shown tab.
+   * A new message, a reply, which is a new message that's never delivered to bots' webhooks in turn, nor
+   * answered by @ember or an agent, as a bot's to a webhook delivery is, and what an AI app sends as the
+   * person who connected it, or someone opening the room in a shown tab.
    */
   kind: "message" | "reply" | "read";
   /** Who wrote the message, or read the room. */
@@ -21,7 +22,11 @@ export interface RoomEvent {
   at: string;
   /** Set for a reply sent only to its thread, which marks the room unread for nobody and isn't its activity. */
   threadOnly?: true;
-  /** For a reply sent only to its thread, who the room says is viewing the thread as it sends the event. */
+  /**
+   * For a reply sent only to its thread, who the room says is viewing the thread as it sends the event,
+   * and for a message in the room, who was viewing the room as it came or is as the room sends it, when
+   * the room knows.
+   */
   viewerIds?: UserId[];
   /**
    * A new message as it is when the room sends the event, for its pushes, unless it has been deleted

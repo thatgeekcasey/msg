@@ -440,6 +440,43 @@ test.describe("Send from the keyboard", () => {
     await expect(ada.composer()).toBeFocused();
   });
 
+  test("quotes line by line, as Slack does: Backspace on an empty quoted line ends the quote, and > quotes just its line", async ({ members }) => {
+    const ada = await members.signIn("Ada");
+    const grace = await members.signIn("Grace");
+
+    // A quote, then what's said about it, on a line Backspace takes out of the quote.
+    await ada.composer().pressSequentially("> Not obvious who is in this room?");
+    await ada.composer().press("Shift+Enter");
+    await ada.composer().press("Backspace");
+    await ada.composer().pressSequentially("Agreed, it needs a people list.");
+    await ada.composer().press("Enter");
+    const reply = grace.message("Agreed").locator(".message-content");
+    await expect(reply.locator("blockquote")).toHaveText("Not obvious who is in this room?");
+    await expect(reply.locator(":scope > p")).toHaveText("Agreed, it needs a people list.");
+
+    // > at the start of a line added above what's written quotes that line alone.
+    await ada.composer().press("Shift+Enter");
+    await ada.composer().pressSequentially("What was said");
+    await expect(ada.composer()).toHaveText("\nWhat was said", { useInnerText: true });
+    await ada.composer().press("ArrowUp");
+    // Lexical hears the caret move with the selectionchange after the key, as a frame goes by.
+    await ada.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await ada.composer().pressSequentially("> The quote");
+    await ada.composer().press("Enter");
+    const quoted = grace.message("The quote").locator(".message-content");
+    await expect(quoted.locator("blockquote")).toHaveText("The quote");
+    await expect(quoted.locator(":scope > p")).toHaveText("What was said");
+
+    // > on a later line quotes that line, leaving the ones before it as they are.
+    await ada.composer().pressSequentially("Before");
+    await ada.composer().press("Shift+Enter");
+    await ada.composer().pressSequentially("> Middle");
+    await ada.composer().press("Enter");
+    const middle = grace.message("Before").locator(".message-content");
+    await expect(middle.locator("blockquote")).toHaveText("Middle");
+    await expect(middle.locator(":scope > p").first()).toHaveText("Before");
+  });
+
   test("starts a new paragraph on Enter while the toolbar shows, and sends on Ctrl or Cmd+Enter, closing it", async ({ members }) => {
     const ada = await members.signIn("Ada");
     await formattingOptions(ada).click();

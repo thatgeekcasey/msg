@@ -6,13 +6,20 @@ import { isReservedName, MAX_USER_NAME_LENGTH, NAME_RESERVED, type DirectoryUser
 /**
  * Where a bot posts messages to a room and reads them, as Campfire's `room_bot_messages_path` gives it,
  * with the bot's key: `/rooms/<room id>/<bot key>/messages`, and with `threadId`, where it posts to that
- * message's thread.
+ * message's thread and reads it.
  */
 export const botMessagesPath = (roomId: RoomId, key: string, threadId?: string) =>
   `/rooms/${encodeURIComponent(roomId)}/${key}/messages` + (threadId === undefined ? "" : `?thread=${encodeURIComponent(threadId)}`);
 
 /** Where a bot posts what a Slack incoming webhook is sent to a room, with the bot's key: `/rooms/<room id>/<bot key>/slack`. */
 export const botSlackPath = (roomId: RoomId, key: string) => `/rooms/${encodeURIComponent(roomId)}/${key}/slack`;
+
+/**
+ * Where a bot posts what a Slack incoming webhook is sent to take the place of its message `messageId`, with
+ * the bot's key: `/rooms/<room id>/<bot key>/messages/<message id>/slack`.
+ */
+export const botMessageSlackPath = (roomId: RoomId, key: string, messageId: string) =>
+  `/rooms/${encodeURIComponent(roomId)}/${key}/messages/${encodeURIComponent(messageId)}/slack`;
 
 /** What the bot pages and their API tell anyone but an administrator. */
 export const BOTS_FORBIDDEN = "Only administrators can manage bots";

@@ -239,7 +239,7 @@ export async function isolateRoom(page: Page, room: TestRoom, { joinCode, huddle
   const invitation = joinCode === undefined ? null : { roomId: room.id, joinCode };
   const huddles = huddle ? { [room.id]: huddle } : {};
   await page.route("**/api/sidebar", (route) =>
-    route.fulfill({ json: { rooms: [{ ...room, kind: "open", icon: null, unread: false, involvement: "mentions" }], favorites: { rooms: [], version: 0 }, sharedOrder: [], invitation, suggestions: [], huddles } satisfies Sidebar }),
+    route.fulfill({ json: { rooms: [{ ...room, kind: "open", icon: null, unread: false, involvement: "mentions" }], favorites: { rooms: [], version: 0 }, sharedOrder: [], invitation, huddles } satisfies Sidebar }),
   );
   await keepOtherRoomsOut(page, [room.id]);
 }
@@ -247,13 +247,18 @@ export async function isolateRoom(page: Page, room: TestRoom, { joinCode, huddle
 /** Which of the workspace socket's frames reach the page. */
 export type Passes = (frame: WorkspaceServerFrame) => boolean;
 
+/** Tells a page `frame` on the workspace socket it has open, as the Workspace does. */
+export type Tells = (frame: WorkspaceServerFrame) => void;
+
 /**
  * Shows `page` the workspace as `change` makes it wherever the server says what it is, its socket's
  * welcome included, without changing the test server's, which every other test shows. Its socket takes
  * over from any the page routed before, such as `isolateRoom`'s, so it passes on just what `passes` does.
+ * Answers how to tell the page something more on that socket, once it's open, as the Workspace would.
  */
-export async function changeTheWorkspace(page: Page, change: (account: Account) => Account, passes: Passes = () => true): Promise<void> {
+export async function changeTheWorkspace(page: Page, change: (account: Account) => Account, passes: Passes = () => true): Promise<Tells> {
   const changed = <T extends { account: Account }>(body: T): T => ({ ...body, account: change(body.account) });
+  let socket: WebSocketRoute | undefined;
   for (const path of ["**/api/bootstrap", "**/api/account"]) {
     await page.route(path, async (route) => {
       const response = await route.fetch();
@@ -262,12 +267,14 @@ export async function changeTheWorkspace(page: Page, change: (account: Account) 
     });
   }
   await page.routeWebSocket(WORKSPACE_SOCKET, (ws) => {
+    socket = ws;
     const server = ws.connectToServer();
     server.onMessage((message) => {
       const frame = JSON.parse(String(message));
       if (passes(frame)) ws.send(JSON.stringify("account" in frame ? changed(frame) : frame));
     });
   });
+  return (frame) => socket!.send(JSON.stringify(frame));
 }
 
 /**
@@ -362,6 +369,19 @@ export async function shownPicture(image: Locator): Promise<{ type: string | nul
     width: element.naturalWidth,
     height: element.naturalHeight,
   }));
+}
+
+/**
+ * Whether an opened huddle's tiles, the items of `list`, keep clear of one another, with each one's
+ * avatar inside it and clear of the name under it, which only a browser's own layout says.
+ */
+export function huddleTilesKeepClear(list: Locator): Promise<boolean> {
+  return list.evaluate((list) => {
+    const apart = (a: DOMRect, b: DOMRect) => a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5;
+    const tiles = [...list.children].map((tile) => ({ box: tile.getBoundingClientRect(), avatar: tile.querySelector("img")?.getBoundingClientRect(), name: tile.querySelector(":scope > span")!.getBoundingClientRect() }));
+    const avatarIsFine = ({ box, avatar, name }: (typeof tiles)[number]) => !avatar || (avatar.top >= box.top && apart(avatar, name));
+    return tiles.every((tile, index) => avatarIsFine(tile) && tiles.slice(index + 1).every((other) => apart(tile.box, other.box)));
+  });
 }
 
 /**
