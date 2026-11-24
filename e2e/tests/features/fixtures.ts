@@ -1,11 +1,17 @@
 import type { Sidebar } from "@ember/protocol";
 import type { APIRequestContext, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
-import { test as app, cookieHeader, createRoom, createSession, editorField, expect, keepOtherRoomsOut, makeAdministrator, type Session, type TestRoom } from "../../fixtures";
+import { test as app, answerChanged, cookieHeader, createRoom, createSession, editorField, expect, keepOtherRoomsOut, makeAdministrator, type Session, type TestRoom } from "../../fixtures";
 
 export { expect };
 
 /** A name no other test's people or rooms have, since they all share the server. */
 export const unique = (name: string) => `${name} ${crypto.randomUUID().slice(0, 8)}`;
+
+/**
+ * Whether the browser can record clips, which the composer offers only where it can: every one the tests run
+ * but Playwright's WebKit for Linux, which CI runs, as it has no MediaRecorder, though Safari has.
+ */
+export const recordsClips = (browserName: string) => browserName !== "webkit" || process.platform !== "linux";
 
 /** The rooms each test has to itself. Its browsers show these instead of the server's own. */
 export interface Rooms {
@@ -17,17 +23,14 @@ export interface Rooms {
  * Makes every page in `context` list just `rooms` of the server's rooms, and any DMs, as the list loads
  * and as the workspace socket brings rooms saved since, since every other test's open rooms take everyone
  * in too, while only the test's own people are in its DMs. The server still answers first, so a session
- * it refuses gets its 401 as usual, a page whose list is current gets its 304, and the welcome card's
- * invitation is the server's, for the general that setup made, which isn't listed.
+ * it refuses gets its 401 as usual, and the welcome card's invitation is the server's, for the general
+ * that setup made, which isn't listed.
  */
 async function showRooms(context: BrowserContext, rooms: Rooms): Promise<void> {
   const ids = new Set(Object.values(rooms).map((room) => room.id));
-  await context.route("**/api/sidebar", async (route) => {
-    const response = await route.fetch();
-    if (!response.ok()) return route.fulfill({ response });
-    const list = (await response.json()) as Sidebar;
-    await route.fulfill({ response, json: { ...list, rooms: list.rooms.filter((room) => room.kind === "direct" || ids.has(room.id)) } });
-  });
+  await context.route("**/api/sidebar", (route) =>
+    answerChanged<Sidebar>(route, (list) => ({ ...list, rooms: list.rooms.filter((room) => room.kind === "direct" || ids.has(room.id)) })),
+  );
   await keepOtherRoomsOut(context, ids);
 }
 
@@ -152,6 +155,36 @@ export const paste = (member: Member, text: string, html?: string) =>
     [text, html] as const,
   );
 
+/**
+ * Types `keys` into the composer while the page's animation frames wait, as on a busy page, so what was to
+ * happen at the next frame, as the list a / opens shows, happens only once they're typed, and once it has.
+ */
+export async function typeWhileFramesWait(member: Member, keys: string): Promise<void> {
+  await member.composer().focus();
+  await member.page.evaluate(() => {
+    const requestFrame = window.requestAnimationFrame;
+    const waiting: FrameRequestCallback[] = [];
+    // An id no frame has, so cancelling it cancels none of the page's.
+    window.requestAnimationFrame = (callback) => -waiting.push(callback);
+    window.addEventListener(
+      "e2e:frames",
+      () => {
+        window.requestAnimationFrame = requestFrame;
+        for (const callback of waiting) requestFrame(callback);
+      },
+      { once: true },
+    );
+  });
+  await member.page.keyboard.type(keys);
+  await member.page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        window.dispatchEvent(new Event("e2e:frames"));
+        requestAnimationFrame(() => setTimeout(resolve));
+      }),
+  );
+}
+
 export interface SignInOptions {
   /** Where to open the app: this test's #general by default. */
   path?: string;
@@ -199,7 +232,7 @@ export const test = app.extend<{ rooms: Rooms; members: Members }>({
         await context.addCookies([session.cookie]);
         contexts.push(context);
         if (!serverRooms) await showRooms(context, rooms);
-        // A pasted link gets no preview, unless a test answers with one, so no test reaches the Internet.
+        // A link written gets no preview, pasted or typed, unless a test answers with one, so no test reaches the Internet.
         await context.route("**/api/unfurl", (route) => route.fulfill({ status: 204 }));
         const page = await context.newPage();
         await beforeOpen?.(page);

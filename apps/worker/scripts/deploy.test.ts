@@ -94,14 +94,18 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const output = (name: string) => (existsSync(path.join(dir, name)) ? readFileSync(path.join(dir, name), "utf8").trim() : null);
 
+/** Has the script take its output for a terminal's, which the suite reads through a pipe. */
+const AT_TERMINAL = ["--import", "data:text/javascript,process.stdout.isTTY=true"];
+
 /**
  * Runs the script, or `script`, with `args` for a Worker whose secrets are `listing`, in a shell like a
- * terminal's unless `env` says it's CI's, Workers Builds' or GitHub Actions', or brings a setup token.
+ * terminal's unless `env` says it's CI's, Workers Builds' or GitHub Actions', or brings a setup token. Its
+ * output is a terminal's there, and a log's in CI, unless `terminal` says otherwise.
  */
 function deploy(
   listing: Listing,
   args: string[] = [],
-  { deployStatus = 0, env = {}, script = SCRIPT }: { deployStatus?: number; env?: Record<string, string>; script?: string } = {},
+  { deployStatus = 0, env = {}, script = SCRIPT, terminal = !env.CI }: { deployStatus?: number; env?: Record<string, string>; script?: string; terminal?: boolean } = {},
 ) {
   const LISTING = Array.isArray(listing) ? JSON.stringify(listing.map((name) => ({ name, type: "secret_text" }))) : listing;
   // The suite itself runs under CI, which the script must hear only from the test.
@@ -118,6 +122,9 @@ function deploy(
     MEMBERFUL_CLIENT_SECRET: _secret,
     MEMBERFUL_API_KEY: _apiKey,
     MEMBERFUL_WEBHOOK_SECRET: _webhookSecret,
+    SSO_ISSUER: _issuer,
+    SSO_CLIENT_ID: _ssoClient,
+    SSO_CLIENT_SECRET: _ssoSecret,
     TURNSTILE_SITE_KEY: _siteKey,
     TURNSTILE_SECRET_KEY: _turnstileSecret,
     RESEND_API_KEY: _resendKey,
@@ -128,7 +135,7 @@ function deploy(
   } = process.env;
   // The script reads git's origin, which for this repository's own script would be the origin of whichever clone runs the suite, so git there finds no repository.
   const git = script === SCRIPT ? { GIT_DIR: path.join(dir, "no-repository") } : {};
-  const run = spawnSync(process.execPath, [script, ...args], {
+  const run = spawnSync(process.execPath, [...(terminal ? AT_TERMINAL : []), script, ...args], {
     env: { ...shell, ...git, PATH: `${dir}:${process.env.PATH}`, LISTING, OUT: dir, DEPLOY_STATUS: String(deployStatus), TARGETS: JSON.stringify([WORKER_URL]), ...env },
     encoding: "utf8",
   });
@@ -305,6 +312,21 @@ describe("Installer-protected setup link", () => {
     expect(logs).toContain(`${WORKER_URL}/first_run#token=<your EMBER_SETUP_TOKEN>`);
     expect(logs).toContain(`pnpm exec wrangler secret put EMBER_SETUP_TOKEN, which asks for it, and open ${WORKER_URL}/first_run#token=<the token>`);
     expect(logs).not.toContain("::notice::");
+  });
+
+  it("makes none where its output isn't a terminal's, as the log of a CI that doesn't say it's one isn't", () => {
+    const { status, secrets, logs } = deploy("no worker", [], { terminal: false });
+    expect(status).toBe(0);
+    expect(secrets).not.toHaveProperty("EMBER_SETUP_TOKEN");
+    expect(logs).not.toContain("Set up Ember at");
+    expect(logs).toContain("this log may be public, so this deploy made no token");
+  });
+
+  it("makes none in a CI that gives it a terminal, either", () => {
+    const { secrets, logs } = deploy("no worker", [], { env: { CI: "true" }, terminal: true });
+    expect(secrets).not.toHaveProperty("EMBER_SETUP_TOKEN");
+    expect(logs).not.toContain("Set up Ember at");
+    expect(logs).toContain("this log may be public, so this deploy made no token");
   });
 
   it("says so as a notice under GitHub Actions, where it shows on the run", () => {
@@ -598,17 +620,17 @@ describe("Updates for a copy made with Deploy to Cloudflare", () => {
 
   /**
    * A checkout of a copy of Ember with this script, cloned from `origin` if one's given, and without the
-   * Update Ember workflow unless `workflow`, as Deploy to Cloudflare's copies are: answers the script there.
+   * Update Ember workflow unless `workflow`, as Deploy to Cloudflare's copies are, nor the beta workflow
+   * unless `betaWorkflow`: answers the script there.
    */
-  function checkout({ origin, workflow = false }: { origin?: string; workflow?: boolean } = {}): string {
+  function checkout({ origin, workflow = false, betaWorkflow = false }: { origin?: string; workflow?: boolean; betaWorkflow?: boolean } = {}): string {
     const root = path.join(dir, "checkout");
     const scripts = path.join(root, "apps/worker/scripts");
     mkdirSync(scripts, { recursive: true });
     for (const file of ["deploy.ts", "jsonc.ts", "vapid-keys.ts", "update-ember.yml"]) copyFileSync(new URL(`./${file}`, import.meta.url), path.join(scripts, file));
-    if (workflow) {
-      mkdirSync(path.join(root, ".github/workflows"), { recursive: true });
-      writeFileSync(path.join(root, WORKFLOW), embersWorkflow);
-    }
+    if (workflow || betaWorkflow) mkdirSync(path.join(root, ".github/workflows"), { recursive: true });
+    if (workflow) writeFileSync(path.join(root, WORKFLOW), embersWorkflow);
+    if (betaWorkflow) copyFileSync(new URL("./update-ember-beta.yml", import.meta.url), path.join(root, ".github/workflows/update-ember-beta.yml"));
     spawnSync("git", ["init", "--quiet"], { cwd: root });
     if (origin) spawnSync("git", ["remote", "add", "origin", origin], { cwd: root });
     return path.join(scripts, "deploy.ts");
@@ -655,12 +677,14 @@ describe("Updates for a copy made with Deploy to Cloudflare", () => {
   });
 
   it.each([
-    [false, {}, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:main --var UPDATE_WORKFLOW:false"],
-    [true, { WORKERS_CI_BRANCH: "release/v1#stable" }, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:release/v1#stable --var UPDATE_WORKFLOW:true"],
+    [false, false, {}, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:main --var UPDATE_WORKFLOW:false --var BETA_WORKFLOW:false"],
+    [true, false, { WORKERS_CI_BRANCH: "release/v1#stable" }, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:release/v1#stable --var UPDATE_WORKFLOW:true --var BETA_WORKFLOW:false"],
+    [true, true, {}, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:main --var UPDATE_WORKFLOW:true --var BETA_WORKFLOW:true"],
+    [false, true, {}, "--var GITHUB_REPOSITORY:someone/my-ember --var GIT_BRANCH:main --var UPDATE_WORKFLOW:false --var BETA_WORKFLOW:true"],
   ])(
-    "tells the Worker the copy's repository, the branch that deploys and whether it has the workflow (%s), without the clone's credentials, for the release card",
-    (workflow, branch, vars) => {
-      const script = checkout({ origin: "https://x-access-token:ghs_clone-only@github.com/someone/my-ember.git", workflow });
+    "tells the Worker the copy's repository, the branch that deploys and whether it has the workflow (%s) and the beta workflow (%s), without the clone's credentials, for the release card",
+    (workflow, betaWorkflow, branch, vars) => {
+      const script = checkout({ origin: "https://x-access-token:ghs_clone-only@github.com/someone/my-ember.git", workflow, betaWorkflow });
       expect(deploy(EVERY_SECRET, [], { script, env: { CI: "true", WORKERS_CI: "1", ...branch } }).status).toBe(0);
       expect(output("deploy-args")).toBe(vars);
     },
@@ -668,8 +692,8 @@ describe("Updates for a copy made with Deploy to Cloudflare", () => {
 
   it("keeps the vars a deploy's options give over the copy's own", () => {
     const script = checkout({ origin: "git@github.com:someone/my-ember.git", workflow: true });
-    deploy(EVERY_SECRET, ["--var", "GIT_BRANCH:production", "--var=UPDATE_WORKFLOW:false"], { script });
-    expect(output("deploy-args")).toBe("--var GIT_BRANCH:production --var=UPDATE_WORKFLOW:false --var GITHUB_REPOSITORY:someone/my-ember");
+    deploy(EVERY_SECRET, ["--var", "GIT_BRANCH:production", "--var=UPDATE_WORKFLOW:false", "--var", "BETA_WORKFLOW:true"], { script });
+    expect(output("deploy-args")).toBe("--var GIT_BRANCH:production --var=UPDATE_WORKFLOW:false --var BETA_WORKFLOW:true --var GITHUB_REPOSITORY:someone/my-ember");
   });
 
   it("says nothing of the workflow to a copy that has it, nor when wrangler fails to deploy", () => {
@@ -701,6 +725,17 @@ describe("Sign in with Memberful", () => {
     const { secrets, logs } = deploy(EVERY_SECRET, [], { env: { MEMBERFUL_URL: "", MEMBERFUL_CLIENT_ID: "", MEMBERFUL_CLIENT_SECRET: "" } });
     expect(secrets).toEqual({});
     expect(logs).toContain("Deploying with the Worker's secrets as they are");
+  });
+});
+
+describe("Single sign-on", () => {
+  it("uploads the provider's issuer and the app's keys the environment gives with every deploy, and never prints the secret", () => {
+    const keys = { SSO_ISSUER: "https://example.zitadel.cloud", SSO_CLIENT_ID: "client-id", SSO_CLIENT_SECRET: "sso-client-secret" };
+    const { status, secrets, logs } = deploy(EVERY_SECRET, [], { env: { ...keys, CI: "true", GITHUB_ACTIONS: "true" } });
+    expect(status).toBe(0);
+    expect(secrets).toEqual(keys);
+    expect(logs).toContain("Deploying with SSO_ISSUER, SSO_CLIENT_ID, SSO_CLIENT_SECRET from the environment");
+    expect(logs).not.toContain("sso-client-secret");
   });
 });
 

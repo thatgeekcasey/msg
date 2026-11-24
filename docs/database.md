@@ -18,21 +18,22 @@ files themselves live in R2, in the bucket bound as `FILES`.
 
 Each file in `apps/worker/migrations/` belongs to one kind of Durable Object, which `MIGRATIONS` in
 `apps/worker/src/migrations.ts` names as its scope: `room` for messages, boosts, revocations, the
-room's change log, its log of messages for the search index, its recent deletions and its files, and
-`workspace` for the workspace-wide tables (the account, people, sessions, linked accounts, push
+room's change log, its log of messages for the search index, its recent deletions, its files, the
+calls of apps' tools that wait to be allowed and the messages people have scheduled there, and
+`workspace` for the workspace-wide tables (the account, people, sessions and the addresses their sockets come from, linked accounts, push
 subscriptions, webhooks, bans, recent searches, rooms, memberships, stars, pending revocations,
-purges and reindexes, and the rooms deleted). On DO SQLite, an object applies only its own scope's
+purges and reindexes, the rooms deleted, the apps connected, the tools picked for each agent, and the AI apps people connect to Ember). On DO SQLite, an object applies only its own scope's
 files, so a room's storage never holds workspace tables. Wrangler applies every file to D1, where
 all the tables share one database and each room's rows carry its `room_id`. The search index's
 schema is in `apps/worker/search-migrations/`, which only the index applies, listed in
 `SEARCH_MIGRATIONS`.
 
 So far rooms keep `messages`, `boosts`, `revocations`, `room_events`, `unindexed_messages`,
-`message_deletions` and `blobs`, the Workspace keeps `accounts`, `users`, `sessions`, `identities`,
+`message_deletions`, `blobs`, `waiting_calls` and `scheduled_messages`, the Workspace keeps `accounts`, `users`, `sessions`, `session_addresses`, `identities`,
 `pending_identities`, `membership_checks`, `membership_catch_ups`, `push_subscriptions`, `webhooks`,
-`bans`, `email_links`, `email_link_requests`, `password_resets`, `searches`, `recent_searches`, `rooms`,
-`memberships`, `favorites`, `pending_revocations`, `pending_purges`, `pending_reindexes` and
-`deleted_rooms`, and the search index keeps `search_messages`, `search_mentions`, `search_rooms` and the
+`bans`, `email_links`, `email_link_requests`, `password_resets`, `searches`, `recent_searches`, `rooms`, `sections`,
+`memberships`, `favorites`, `blocks`, `reports`, `pending_revocations`, `pending_purges`, `pending_reindexes`, `pending_readers`,
+`deleted_rooms`, `apps`, `app_sign_ins`, `own_app_sign_ins`, `agent_tools`, `outside_clients`, `outside_connections` and `outside_spent_tokens`, and the search index keeps `search_messages`, `search_mentions`, `search_rooms`, `search_keys`, `search_readers`, `search_rekeys` and the
 FTS5 table `search_index`. A room's id also
 names its Durable Object, and the Worker asks the Workspace whether someone is a member before it
 wakes the room for their socket. First run creates the account and its administrator, who signs in
@@ -78,14 +79,29 @@ Objects, D1 or speed call for something else.
   styles. Ember's custom domain and tagline are more of those settings (`custom_domain` and
   `tagline`), so they took no migration and are read with the rest of the account, and so are the
   address its email comes from (`email_from`), the keys of the Turnstile widget an administrator
-  gave it (`turnstile_keys`, the secret key sealed) and those of the Realtime SFU app huddles run
-  through (`huddles`, the app's secret sealed).
+  gave it (`turnstile_keys`, the secret key sealed), those of the Realtime SFU app huddles run
+  through (`huddles`, the app's secret sealed) and those of the Memberful site whose members sign in
+  (`memberful_keys`, its custom app's secret and API key and its webhook's secret sealed together).
+  The words and phrases Blocked words keeps out are one more (`blocked_words`), saved without
+  touching `updated_at`, since no page shows them: the Workspace checks names, bios and rooms' names
+  against them, and each room keeps them in memory to check its messages and files' names against,
+  asking again once a message it saves comes back from the Workspace with another version of them, or
+  once they're a minute old.
 - **Unread marks are a column of the membership.** `memberships.unread_at` is when a room was marked
   unread for someone, null while it isn't, and one `UPDATE` marks every member a message should. We
   skip Campfire's `connections` and `connected_at` columns: each room's object knows from its
   sockets who's viewing it, and sends that list with its messages. And ours writes only the rows it
   changes, so `unread_at` is the time of the first message since someone last read the room; nothing
-  reads it but to ask whether it's set.
+  reads it but to ask whether it's set. A room tells the Workspace of a message a moment after it,
+  longer in a burst, when someone may have joined meanwhile, so the `UPDATE` leaves out each
+  membership whose `created_at` is after the message was written, as the mention counts and pushes
+  below do. In a DM the same `UPDATE` writes every unread row, adding one
+  to `memberships.unread_count` (workspace migration 0065), so a DM's row counts its messages since,
+  as Slack's do; a read sets it back to 0. A shared room's row counts the messages since that
+  notify its member instead, in `memberships.mention_count` (workspace migration 0085), which the
+  sidebar shows as Slack's mention badge: one more `UPDATE` in the batch that marks the room raises
+  it, for everyone `@channel` or `@everyone` notifies, or for the people a JSON list names, those a
+  message mentions and those `@here` finds active. A read sets it back to 0 with the mark.
 - **No unbounded lists of bound values.** Durable Object SQLite and D1 bind at most 100 values a
   statement, and binding a page's message ids made a 100-message page fail on both.
 - **Tabs that connect again find what changed through an index on messages.** Campfire's
@@ -106,29 +122,72 @@ Objects, D1 or speed call for something else.
 - **Search is one FTS5 table, read from its newest match.** As Campfire's `message_search_index` is,
   it's an FTS5 table with the porter tokenizer holding each message's plain text, and a search
   quotes each word, so that every word has to match and none is read as FTS5's syntax, such as `NOT`
-  or `NEAR`. It reads the newest 1,000 matches off the index, wherever they are, keeps the newest
-  100 in rooms the searcher is in, and only when those 1,000 hold fewer and there may be more does
-  it ask for just those rooms' matches, by whatever plan SQLite picks. The rooms go to it as one
+  or `NEAR`. It walks the index's matches from the newest, wherever they are, keeps the ones in
+  rooms the searcher is in, and stops at 100 and one more, which says there's another page: one
+  statement, whatever the other rooms hold. It used to read the newest 1,000 matches and ask for
+  just the searcher's rooms' only when those held too few, so a second query ran or not by how many
+  matches were in rooms the searcher isn't in, and the time a search took told them whether a word
+  was written there. It still passes over each match in another room, a row's read apiece, as the
+  FTS5 table doesn't tell rooms apart. The rooms go to it as one
   JSON value. Campfire numbers the index's rows by message id, which grows with time. Ours are
   strings, and each room's messages reach the index on their own schedule, so the index numbers the
   messages it takes itself (`search_messages`): a message's time in milliseconds, times 1,024, plus
   its place among that millisecond's. Walking the index from its largest number then goes from the
   newest message, whichever room it's in and however late it came, with nothing to sort, which a
-  test checks with `EXPLAIN QUERY PLAN`, and an edit keeps its number. The index reads the first
-  query a match at a time, and stops at a full page. Over 100,000 messages in 50 rooms, a search for
-  a word in a quarter of them takes 0.3 ms of SQLite for someone in every room, where reading all
-  1,000 matches took 1.2 ms; for someone in one of the 50, reading the 1,000 and then their room's
-  matches takes about 12 ms. A word in one message takes 0.03 ms.
+  test checks with `EXPLAIN QUERY PLAN`, and an edit keeps its number. Over 100,000 messages in 50
+  rooms, a search for a word in a quarter of them takes 0.3 ms of SQLite for someone in every room,
+  where reading all 1,000 matches took 1.2 ms; for someone in one of the 50, passing over the
+  matches in the other 49 on the way to a page of theirs takes about 3 ms, where reading the 1,000
+  and then their room's matches took about 12. A word in one message takes 0.03 ms.
+- **The index can keep a room's words under a key.** Search migration 0005 gives a room that not
+  everyone can read a key, a private room or a DM of three people or more its own and a DM of one or
+  two people each of its people's, and the index keeps each word of its messages with the key in
+  front of it, between two characters for private use (`search-words.ts`), so FTS5's list of the
+  messages with a word kept under a key lists only that room's, or that person's DMs'. A search looks
+  for each word plainly and under the keys of the rooms it looks in, and its searcher's own. Porter
+  stems a word under a key as it does the word alone, as keys are written in digits and consonants,
+  but for words of one or two letters. The index keeps an open room's words plainly, as before, and a
+  room's it hasn't heard about too. The release before this one reads words kept either way, and keeps
+  a room's under its keys once it has them, so a copy that goes back to it reads the index this one
+  leaves. The Workspace queues each room whose kind changes in `pending_readers` (migration 0080) and
+  its alarm tells the index of them, 100 rooms a call, settling a room only at the version it told, so
+  a room queued again meanwhile is told of again. The index asks the Workspace who can read each room
+  it holds messages of and hasn't heard about (`search_rooms.heard`, search migration 0006, which
+  every room it held before starts without): at once as such a room sends it messages, without the
+  room waiting for the answer, 100 rooms a call, and the rest with its walk, below, as after an update
+  or a copy coming back to this release. An answer about a room it has been told of since it asked
+  changes nothing, as it may be from before the change. So the index misses no room whose kind changed
+  while a copy ran the release before, whether it came from the one before that or went back to it
+  from this one.
+- **The index keeps a room's earlier messages under its keys a few at a time.** Hearing that a room's
+  words go under keys, the index keeps its messages of the last hour under them at once, up to 200,
+  and leaves the rest to a walk: 125 an hour, or 3,000 a day, the newest of any room's first. Each
+  writes about three rows, half what taking a new message does, so the walk spends about a tenth of
+  the 100,000 rows Workers Free lets a day write, which running out of stops Ember until midnight UTC.
+  A run first asks about up to 40 of the rooms the index hasn't heard about, each taking three of its
+  125, as hearing about a room writes about nine rows, so asking about every room a copy held before
+  keeps to the same tenth. `search_rekeys` notes each room with messages left and one more than the
+  number of its newest, so a run goes on where the last stopped, and the index's storage keeps when
+  the next run is due. Until the walk reaches a message, a search finds it as before, plainly.
 - **Search filters are conditions on the index's own rows.** Slack narrows a search with modifiers
   such as `in:`, `from:` and `has:link`, which Campfire has none of. The index keeps what they narrow
   by beside each message (search migration 0003): who wrote it, the thread it's in, whether it has a
   link or a file, and, in `search_mentions`, whom it mentions. Includes me finds the messages that
   mention you, are in your DMs, or are in threads you've written in. A search's filters are
-  conditions the probe reads as it walks the index, newest first or oldest, so they cost nothing
-  while the first matches meet them, and only when those don't fill a page does the rest of the
-  search ask SQLite for just the messages that meet them, through an index on the person and the
-  number, or of the messages with links, or files. A search of filters alone walks `search_messages`
-  in the same way. Show more starts past the number of the last match shown, so each page is read as
+  conditions it checks as it walks the index, newest first or oldest, so they cost nothing while the
+  first matches meet them. A search of filters alone has no words to walk, so it walks the messages
+  of the searcher's rooms, and no other room's: each room's through an index that starts with the
+  room (search migration 0004), of just someone's messages there, or the ones with files, with links
+  or in threads, when the search has such a filter, and one recursive query takes whichever room's
+  message comes next, so nothing is sorted and a room is read only as far as the page goes. Includes
+  me has no index, so it's checked message by message. It used to walk every room's newest 1,000
+  messages first, and then someone's in every room, so the time it took told a searcher how much was
+  written in rooms they aren't in, and when: a test checks that it reads the same rows whatever
+  those rooms hold. No search reads 0003's indexes on the person, links and files alone now, which
+  run through every room. Over 300,000 messages in 50 rooms, a page of the messages with files takes
+  0.9 ms of SQLite for someone in every room, where sorting their rooms' took 270 ms, and Includes
+  me 4 ms for someone with five DMs; with nothing to find, it reads every message of their rooms,
+  about 2 µs each. Show more starts past the number of the last match shown, so each page is read as
   the first was, and FTS5's `highlight` gives the words each match matched, as its text has them, for
   results to mark. Workspace migration 0047 had every room log its messages once more, for the index
   to take each with its filters.
@@ -172,10 +231,39 @@ Objects, D1 or speed call for something else.
   when a message's text last changed. Room migration 0012 turned the plain-text bodies from before
   it into the paragraph Lexxy sends for typed text, in SQL, and set `edited_at` from `updated_at`
   for the messages already edited.
+- **A room mention keeps only the room's id.** A room picked after # is an attachment of
+  `application/vnd.campfire.room` whose sgid is the room's id, with no name in it, so a rename shows
+  at once and no message stores a private room's name. Its plain text says `#name` for an open room
+  and `#private room` for a private one, whoever wrote it, since notifications and search reach
+  people who aren't in the room, and the Worker reads no private room's name for it
+  (`MENTIONED_ROOMS`). Each client names the rooms its sidebar lists, and no others.
+- **A message keeps whom it notified.** Slack's @here, @channel and @everyone mention no one: each is
+  an attachment whose sgid is its name, which no user id can be, as a bot's Slack payload makes one
+  of its text's `<!here>`, `<!channel>` or `<!everyone>`. As a message is written its room asks
+  the Workspace whether it may notify the room, which only a message sent to a room's timeline does,
+  not one in a DM, a reply in a thread, a bot's reply or an AI's answer, and never one from an AI
+  agent, and whether it may with @everyone, which only an open room takes, from anyone but a guest.
+  The Workspace answers in one statement, which reads too the account's settings, where
+  administrators can keep @channel and @here, or @everyone, to themselves, and
+  `rooms.channel_mentions_allowed` (workspace migration 0083), 1 until an administrator turns them
+  off in the room's settings. A special mention the answer leaves out is stored as the text it
+  shows, so it notifies nobody, and doesn't look as if it did.
+  `messages.notifies` (room migration 0082) keeps the widest it made, `here`, `channel` or `everyone`,
+  or null for none, and an edit can only narrow it, since an edit notifies nobody. The room's log
+  reads it with the message's text, and history sends it, which highlights the message as one that
+  mentions everyone. Before a message making one goes, the composer asks the Workspace how many people
+  the room holds and how many each mention would notify (`GET /api/rooms/<id>/notified`), to ask its
+  writer first in a room of six or more, as Slack does: one batch of two counts over the room's
+  memberships, @here's of those whose tabs are in use, which it binds as one JSON list, as the pushes do.
 - **Sessions keep a digest of their token.** Campfire stores each session's token as it is and signs
   the cookie that carries it. We store an HMAC of the token, keyed by `SESSION_SECRET`, so a leaked
   database or backup holds no live sessions; changing the secret still signs everyone out, as
   changing Campfire's does.
+- **Sessions know which sign-in links they've ended.** Campfire's sign-in links are signed ids of
+  their person, which work until they expire. Ours name the session that showed them too, and work
+  only while it's signed in. A new password saved from a profile, and Disconnect Memberful, end the
+  person's other sessions and keep the one that asked, so `sessions.transfers_since` (workspace
+  migration 0064) holds when that was, and a link the session showed before then signs nobody in.
 - **Passwords are scrypt digests.** Campfire keeps bcrypt digests, which Workers could only make
   with bcrypt compiled to WebAssembly. `users.password_digest` holds
   `$scrypt$ln=15,r=8,p=3$<salt>$<hash>` (the PHC string format), made by Node's `crypto.scrypt`,
@@ -189,6 +277,16 @@ Objects, D1 or speed call for something else.
   Ember allows, so turning `EMBER_GUEST_SIGN_IN` off keeps them out without deleting anyone. Unless
   they're administrators, they aren't given the join link's code, since an account they made with it
   would stay.
+- **Usernames are unique, in lowercase.** `users.username` (workspace migration 0072) keeps the one
+  someone picked, by which typing @ finds them, or null while they have none, under a unique index,
+  which takes any number of nulls. The Worker keeps each in lowercase, without spaces or a leading @,
+  so the index tells apart only usernames people would, and refuses one that's @ember's name or an
+  agent's, as an agent can't be named with anyone's username either. Someone new who joins with
+  Memberful starts with one made from their name, or that with the first number from 2 that's free,
+  which one range read of the index finds (`username >= ?1 AND username < ?1 || '{'`, as `{` sorts
+  after every character a username can have). The @ prompt finds the active people whose names
+  contain what's typed, or whose usernames start with it, in the scan it makes anyway, since no
+  index serves the middle of a name.
 - **Sessions are kept in memory.** Campfire looks up each request's session in its database. Ours
   live in the Workspace, which every request and socket upgrade calls, and on D1 the lookup would
   add a round trip to each. So the Workspace keeps the 10,000 sessions used most recently
@@ -226,10 +324,20 @@ Objects, D1 or speed call for something else.
   from the set of banned addresses it keeps, so the check costs that call but never a database read,
   even on D1. It reads the set again after a ban or a lifted ban, and doesn't keep a read that one
   overtook. A room socket's check reads the address's ban in the statement that already reads the
-  person's membership, so it costs nothing more and never waits on that set. Banning addresses, or
-  lifting their ban, queues closing the sockets from each in every room: one `INSERT ... SELECT`
-  joins `rooms` with the addresses, sent as one JSON value, writing a `pending_revocations` row for
-  each.
+  person's membership, so it costs nothing more and never waits on that set.
+- **Bans reach the rooms that can hold a socket from their addresses.** Banning addresses, or lifting
+  their ban, queues closing the sockets from each, and a room lets in only its members, so only the
+  rooms of the people whose sessions came from them can hold one. A room socket's check, or an
+  upload's, records in the same transaction that its session comes from its address, in
+  `session_addresses` (workspace migration 0076), which writes a row only the first time, and before
+  it reads the ban, so a ban saved meanwhile finds the session. Its rows go with their session. One
+  `INSERT ... SELECT` then finds the sessions through the table's index by address, the addresses
+  sent as one JSON value, and their people's rooms through `memberships`' index by person, writing a
+  `pending_revocations` row for each room and address, and leaving out whoever is banned, whose
+  sessions' sockets close for good anyway. It used to write one for every room, more of them the more
+  people there are, since everyone who joins has a DM with everyone: at 64 people a ban asked 2,041
+  rooms. The migration took the address each session was last seen at as one its sockets came from,
+  as sockets let in before it can still be open.
 - **A ban deletes messages through the outbox, a page at a time.** Campfire's
   `RemoveBannedContentJob` finds a banned person's messages through `index_messages_on_creator_id`
   and deletes them one by one. Ours are spread over rooms, so the batch that bans someone writes a
@@ -247,6 +355,18 @@ Objects, D1 or speed call for something else.
   each purge still waiting, and the room then deletes only what they wrote by then. What they write
   once they're back stays however late a room answers, and what a socket of theirs sent before the
   room closed it still goes.
+- **Deleting your account purges as a ban does, and keeps the row.** Apple asks that deleting an
+  account delete what it shared, so the batch that deletes someone's account ends their sessions,
+  queues closing their sockets by their person tag, which also turns away an AI app's message
+  already on its way, queues a purge in every room they could have written in, as a ban does, takes
+  them out of every shared room, forgets their stars, recent searches, push subscriptions, sign-ins
+  and connected apps, queues deleting their photo, and empties their row: named "Deleted person",
+  with no email address, password, bio or photo, deactivated, and `users.deleted_at` (workspace
+  migration 0068) saying why, which no ban or lifted ban can change. The row stays, since what's
+  left in rooms keeps their id, such as a thread's first message, kept for its replies. Their purge
+  deletes all their messages, 100 at a time, then their boosts on others' messages, through
+  `index_boosts_on_room_id_and_booster_id` (room migration 0069), then renames them on what's left
+  in one `UPDATE` through the index by creator.
 - **Granting rooms is one statement.** Campfire's `grant_to` binds the ids of everyone a room takes
   in, which our bound-value limit would cut to a few dozen rows a statement, and reading them first
   would cost D1 a round trip of its own, so each grant selects from `users` or `rooms` inside its
@@ -275,6 +395,31 @@ Objects, D1 or speed call for something else.
   values however many stars there are, and changes nothing unless the order holds exactly their
   stars. A star outlives its person's membership: it's left out while they can't star the room, and
   dropped at their next star, unstar or reorder.
+- **Blocks are rows of their own**, a `blocks` row for each person someone has blocked (workspace
+  migration 0070), keyed by the two of them, so a block or unblock writes its row and bumps
+  `users.blocks_version`, as stars bump theirs, in one batch. The statements that mark rooms unread,
+  push messages and invite people to huddles each skip whoever has blocked the writer with a probe
+  of that key, and starting a DM refuses a writer someone in it has blocked in the same `INSERT`, so
+  none of them binds a list of who's blocked whom. Blocking hides the DM between the two from the
+  blocker's sidebar by making their membership `invisible`, keeping the level it had in
+  `blocks.direct_involvement`, which unblocking gives back; only the block a request writes hides it,
+  found by its `created_at`, so blocking again leaves be a DM shown since. `index_blocks_on_blocked_id`
+  finds the blocks of someone whose account is deleted, which go with it, as theirs do, bumping the
+  `blocks_version` of each person who had blocked them.
+- **Reports are rows of their own**, a `reports` row for each (workspace migration 0073), holding as
+  JSON in `subject` the message or the person as they were when reported, which the report shows
+  whatever becomes of them, and whom it's of in `subject_id`, so every list and count of them leaves
+  out an administrator's own with `subject_id <> ?`. Keeping one is an `INSERT ... SELECT ... WHERE
+  NOT EXISTS` an open one by the same person of the same message or person, so a second report keeps
+  nothing. The open ones, newest first, and the ones handled last come by
+  `index_reports_on_handled_at_and_created_at`, and deleting a message, or removing or banning
+  someone, closes every open report of it, or of them, in one `UPDATE ... RETURNING` by
+  `index_reports_on_message_id` or `index_reports_on_subject_id`. Every active administrator's count
+  of open reports is one statement, which binds nothing however many there are. Reports stay when
+  whoever made them, or whoever they're of, deletes their account, as the administrators' record, but
+  deleting an account takes what the reports of them kept of them out of `subject` in the same batch,
+  by `index_reports_on_subject_id` (`CLEAR_REPORTS_OF`), as workspace migration 0078 does for accounts
+  deleted before then, and keeping one is refused in its `INSERT` once whoever it's of has deleted theirs.
 - **A room's place in the shared order is a column of the room**, `rooms.shared_position` (workspace
   migration 0020), so the sidebar's statement reads each room's place with the room, and listing the
   order costs nothing more, nor reads the places of rooms someone isn't in. Saving it reads the
@@ -285,6 +430,16 @@ Objects, D1 or speed call for something else.
   decide who can see a room, so nothing comes between the read and the writes. A deleted room leaves
   the order with its row. Whether only administrators create rooms stays in the account's settings,
   as in Campfire, and the Workspace keeps it with the rest of the account it has read.
+- **A room's sidebar section is a column of the room**, `rooms.section_id`, beside a `sections` table
+  of their names and places (workspace migration 0081), so the sidebar's statement reads each room's
+  section with the room, and the sections come from one more statement in the same batch. Saving the
+  layout in Rooms and permissions puts the sections in order, then each room the administrator could
+  order in its section, or in none, in two `UPDATE ... FROM json_each`, given the order and the
+  rooms' pairs of room and section as JSON values, so it binds the same few values however many rooms
+  there are, and skips what's in place already. A room in a section the layout doesn't list, as one
+  made after the page read the layout, stays where it is. Two sections can't share a name, with
+  letters in either case alike, which the statements that make and rename one check as they write,
+  and deleting one puts its rooms in none in the same batch.
 - **A room's huddle is columns of the room.** A huddle's sockets are its room's object's, which
   alone knows who's in it, and Campfire has nothing like one. For everyone in the room to see it, in
   the huddle or not, the Workspace keeps who's in it, a JSON list of their ids in the order they
@@ -297,15 +452,72 @@ Objects, D1 or speed call for something else.
   arrive out of order the later stands, one from before a huddle ended can't bring it back, and a
   room that was too late is told so, and reports again after it. While a huddle goes on the room's
   alarm rings every half a minute and says who's in it again, which is what makes up for a call that
-  failed; a report that says what's kept reads no memberships and writes nothing, unless it says
-  that no huddle is going on, when its time is kept: the Workspace may never have heard of the
-  huddle that's over, and a report of it that arrived after that would otherwise start it again,
-  with nobody left in it to say it's over. From before the Workspace hears of anyone until it has
-  heard that the huddle is over, the room's object keeps the room's id in its own storage
-  (`huddleRoom`), so the alarm can say so with nobody left in it, whatever became of the object
-  meanwhile. The tracks Cloudflare's Realtime SFU didn't close when asked wait there too
-  (`huddleUnclosed`), for the alarm to ask about again, and since the alarm then rings far more
-  often than a failed log is sent again, the room keeps when its logs are next due (`logsDue`).
+  failed. A report that says what's kept reads no memberships, but its time is kept all the same,
+  since a call the room gave up waiting for can still arrive after it: made earlier, that call then
+  changes nothing, where it would otherwise show the wrong people until the room's next report, or
+  start a huddle that's over again, with nobody left in it to say it's over (as when the Workspace
+  never heard of the huddle). From before the Workspace hears of anyone until it has heard that the
+  huddle is over, the room's object keeps the room's id in its own storage (`huddleRoom`), so the
+  alarm can say so with nobody left in it, whatever became of the object meanwhile. The tracks
+  Cloudflare's Realtime SFU didn't close when asked wait there too (`huddleUnclosed`), for the alarm
+  to ask about again, and since the alarm then rings far more often than a failed log is sent again,
+  the room keeps when its logs are next due (`logsDue`). Whether a room allows huddles is a column
+  of the room too, `rooms.huddles_allowed` (workspace migration 0067), 1 until its settings turn
+  them off: the sidebar's statement reads it with the room, the room's settings save it in the
+  `UPDATE` that saves its name and icon, which changes nothing while it's as it was, and the room's
+  object asks the Workspace for it with the app huddles run through, in one call, as someone joins
+  and at each check.
+- **A huddle's message is a message's row.** The message a huddle has in its room is a row of
+  `messages` like any other, in the name of whoever started the huddle, so its time, link,
+  reactions and thread are a message's. What it says of its huddle is JSON in `messages.huddle`
+  (room migration 0066), as a file is in `attachment` and a bot's cards in `cards`: when the huddle
+  started, and once it's over, when it ended and who was in it, by the names and pictures they had
+  then. Who's in it meanwhile isn't kept there, since a tab has that from the room's huddle in its
+  sidebar, so the row is written twice for most huddles, however many come and go. Each write takes
+  the room's next `change_seq`, so a tab that connects again catches up on it, and is logged for the
+  search index, but the row has no `room_events` row: it marks the room unread for nobody, isn't its
+  latest activity, and reaches no push or webhook. The room's object keeps the message's id in its
+  own storage (`huddleMessage`) from before it writes the row, so a write whose answer it never had
+  isn't made twice, and with it when the huddle started, everyone who has been in it, since the
+  huddle's sockets only say who's in it now, when it was found over, and whether it has gone on
+  since. Whoever joins, and that a huddle goes on which the row says is over, are kept before the
+  row is written again, so a row that can't be written while its huddle goes on names everyone who
+  was in it, and says when it ended, once it can. The id is the huddle's to
+  give as it starts, and its sockets carry it, so that each tab that joins is told which message's
+  thread is the huddle's, to show beside the people in it. The alarm that says who's in the huddle
+  again brings the message in step with it too, which makes up for a write that failed, and for an
+  object that came back with nobody left in its huddle. A row still unwritten as its huddle ends is
+  written then, saying that it's over, and one deleted before the room heard that it was written
+  stays deleted. A huddle that nobody joined leaves no row: once it's over, the room deletes the row
+  as it deletes any message's, and forgets what it kept of the huddle. Unless someone was invited
+  into the huddle, which the room keeps with the rest once anyone is, or the row has a reply in its
+  thread or a reaction: then it says that the huddle is over, as any other's does. A deletion whose
+  answer never came may have been saved all the same, with nobody told: the room's next check then
+  finds the row gone, and tells everyone by the number `message_deletions` has for it.
+- **The huddles that are over are rows of the Workspace's.** The Huddles page lists the latest
+  huddles that are over in all of someone's rooms, as Slack's lists its recent huddles, which no
+  room's object can answer for the others, so the Workspace keeps a row for each in `past_huddles`
+  (workspace migration 0074): its message's id, which is its key and sorts by when the huddle
+  started, its room, when it started and ended, a JSON list of the ids of everyone who was in it, in
+  the order they first joined, and how many replies its thread has. The rows say what each room
+  says of its huddles' messages. A room logs a huddle's message in `changed_huddles` (room migration
+  0075) in the batch that has it say its huddle is over, or that it goes on after all, that gives
+  its thread a reply or deletes one, or that deletes the message, and a courier of its own sends
+  the Workspace what each logged message says as it sends it, forgetting the log's rows once the
+  Workspace has taken them, as the search index's log goes: a call that failed is made again, and
+  the list can be a moment late. The Workspace takes a call in one batch. A huddle that's over,
+  which someone else joined or whose thread has a reply, is listed, or its row brought in step, by
+  one upsert that leaves a row alone that says the same already; any other goes from the list; and
+  the room's members are read, to be told on their workspace sockets that the list changed, when it
+  did, so a call made twice tells nobody twice. The frame names no huddle, since each tab on the
+  page asks for the list again, and the others do nothing with it. A deleted room's rows go with it
+  (`ON DELETE CASCADE`). The page's statement goes through someone's memberships, but for those of
+  the rooms they've hidden from their sidebar, whose huddles the page leaves out and which would
+  otherwise crowd the others' off it, and reads each room's latest 50 from the end of
+  `index_past_huddles_on_room_id_and_message_id`, keeping the latest 50 of them all, so a room's
+  older huddles are never read, however many it has had.
+  Migration 0075 logs the huddles there were before it, so each is listed once its room is next
+  opened.
 - **Rooms are named by their ids, and some have no creator.** A room's id names its Durable Object
   too, so it's a 16-character sortable string like a message's rather than an integer, and its kind
   is `open`, `closed` or `direct` rather than Rails' class name. The rooms from before the Workspace
@@ -320,25 +532,45 @@ Objects, D1 or speed call for something else.
   0036), so it stays dismissed on every device they sign in on, whatever their role later. The
   sidebar reads it in the statement that already reads the version of their stars, so it costs no
   statement more.
+- **Which huddle sounds someone hears are columns of the person.** `users.huddle_music`,
+  `huddle_chimes` and `huddle_ring` (workspace migration 0071) are each 1 until they turn that sound
+  off on their profile: a huddle's music, its sounds of someone joining and leaving, and an
+  invitation's ring. Kept with the person, as Slack keeps its preferences with the account, what
+  they choose holds on every device they sign in on, where a browser's storage would keep it for
+  that browser alone. The sidebar reads them in that same statement, so they cost no statement
+  more either, and says nothing of them while all three are on, which leaves the sidebar of
+  someone who has turned none off, and its ETag, as they were. One `UPDATE` changes the sounds a
+  switch names, keeps the rest, and returns all three, which the Workspace tells that person's
+  tabs, one change at a time, so that the last a tab hears of is the last kept. Deleting an account
+  puts all three back to 1, with the rest of the person's picks.
+- **A pause of someone's notifications is a column of the person.** `users.notifications_paused_until`
+  (workspace migration 0086) is when their pause ends, as an ISO 8601 time in UTC, which the browser
+  works out, since Ember keeps nobody's time zone, or null while they've paused none. The queries
+  that find a message's pushes, the room's for one that notifies it, and an invitation's into a
+  huddle each leave out whoever's pause ends after the time they bind, which ISO times in UTC let
+  SQLite compare as text, so a pause costs them no statement, and one that has passed needs no write
+  to end, nor keeps anything to send once it has. The people directory reads the column with the
+  rest of the person and lists it only while it's ahead, so their half-moon is in the list everyone
+  already loads, and one `UPDATE`, batched with reading the person back, saves a pause or ends it,
+  which the Workspace tells everyone's tabs as `user.updated`, as it does a rename. Deleting an
+  account clears it.
 - **Each group of people has one DM, found by its key.** Ember keeps each DM's members' ids, sorted,
   as a JSON array in `rooms.direct_key` (workspace migration 0016), under a unique index. Starting a
   DM is one batch: it adds the room unless the key has one (`ON CONFLICT DO NOTHING`), puts the
   group in it only if it was added, and reads the DM the key names. So it costs the same however
   many DMs there are, and two people starting the same DM at once get one between them. A DM's
   members never change, so its key stays true.
+- **Someone who joins is welcomed in the batch that adds them.** As Slack does, each active person
+  here gets a DM with them, which `rooms.newcomer_id` (workspace migration 0065) says is a welcome,
+  so its timeline opens with their having joined. The batch that adds them adds the DMs and puts both
+  people in each from one JSON list read with `json_each`, so it binds the same few values however
+  many people there are, though it writes a room and two memberships, and their indexes, for each.
 - **A DM's place is the time of its latest message, which the Workspace writes as it applies it.**
   The Workspace keeps when a DM's latest message came in `rooms.last_message_at` (workspace
   migration 0017), set by the statement that records the events a room sent (`applied_seq`, below)
   when they hold a message, and never moved back, so events sent again or late change nothing. Until
   a DM has one, it goes by `created_at`. The sidebar's statement reads the time with each room, so
   listing DMs in order costs nothing more.
-- **Suggestions are one statement.** The people someone has DMs with are left out with a subquery
-  over the memberships of their DMs, rather than a `NOT IN` list of their ids, so it binds one value
-  however many DMs they have, and runs in the batch that reads the rest of the sidebar.
-  `index_users_on_created_at_and_id` (workspace migration 0017) gives it people oldest first, so it
-  stops at the nineteenth it can suggest rather than sorting everyone. The index leaves status out,
-  since SQLite would otherwise read every active person through it, as New room's list does, rather
-  than reading the table straight through.
 - **Rooms send the Workspace their change logs.** Unread marks are the Workspace's and messages
   their rooms', so a room logs each new message in `room_events`, in the batch that stores it, and
   each time someone opens it in a shown tab, then sends the Workspace its oldest events, up to 50 a
@@ -392,7 +624,7 @@ Objects, D1 or speed call for something else.
 - **Search results come from the index.** Campfire reads the matching messages in the query that
   finds them. Ours live in their rooms, so the index keeps each message's row as its room sent it,
   boosts and all, as JSON in `search_messages.message` (search migration 0002), and a search answers
-  from that alone. The probe reads it only for matches in the searcher's rooms. Results show a
+  from that alone. A search reads it only for the matches on its page. Results show a
   message as the index last took it, so an edit, a boost or a deletion shows once the room's log
   reaches the index, as a new message is found, where Campfire's are as of the search. Before, on DO
   SQLite the Worker asked each room with matches for its own, six rooms at a time, waking every room
@@ -438,7 +670,16 @@ Objects, D1 or speed call for something else.
   deleted since has none, and isn't pushed. The Workspace finds a message's recipients and badges in
   one query, in the batch that applies the room's events, just after the message's unread marks,
   through the memberships' key, the subscriptions' index led by the person and, for the badge,
-  `index_memberships_on_user_id_and_room_id`. So pushes add no round trip to either object.
+  `index_memberships_on_user_id_and_room_id`. A message that notifies the room with @channel, or
+  with @everyone in an open room, where everyone is, is pushed by a second query of that shape,
+  which reaches everyone who hears the room's @mentions or more, and one with @here by the same
+  query as any message, with the people whose Ember is in use, as the Workspace's presence has them,
+  added to those it mentions. So pushes add no round trip to either object. An invitation into a
+  huddle is pushed by one more statement of that shape, in the call by which its room has the
+  Workspace invite people: it reads the memberships of the people invited by their key, however many
+  the room has, and their subscriptions and badges as a message's does. Nothing is stored of who has
+  Ember in view, which decides who is pushed one: each workspace socket keeps whether its tab is
+  shown in its attachment, as a room's socket does.
 - **A bot is found by its id, so its token needs no index.** Campfire keeps a bot's token in
   `users.bot_token` under a unique index, and finds the bot a key names by its id and token together
   (`User.authenticate_bot`). Ours keeps the token in the same column (workspace migration 0027)
@@ -473,8 +714,9 @@ Objects, D1 or speed call for something else.
   identity, session and open rooms are one batch, so nothing is left behind. Whether Memberful's
   members join with it, and whether only they sign in, are two more of the account's settings
   (`memberful_join` and `memberful_sign_in`, the first read as the second while it's absent, as in a
-  workspace saved before it), and the site's keys are Worker secrets, so the client secret is never
-  stored. The table names no provider but by its issuer, so another provider would need no
+  workspace saved before it), and so are the site's keys an administrator gave in Set up Memberful
+  (`memberful_keys`, above), whose secrets are sealed, unless Worker secrets take their place. The
+  table names no provider but by its issuer, so another provider would need no
   migration. People who sign in this way have no `password_digest`. Someone with an account from
   before connects one once their password checks out: `pending_identities` (workspace migration
   0039) keeps the connection's OAuth state, as its HMAC under SESSION_SECRET, whose account it's
@@ -491,6 +733,23 @@ Objects, D1 or speed call for something else.
   `pending_identities` rows, each statement checking that the row is still there, `password_digest`
   is still the one the Worker checked and `email_address` is one. Each row keeps the account's name and email address as Memberful last described it
   (workspace migration 0049), refreshed as it signs them in, only so their profile can name it.
+- **Single sign-on goes through the same tables.** A provider that speaks OpenID Connect links
+  accounts in `identities` by its issuer and the ID token's `sub`, connects them through
+  `pending_identities`, and suspends someone outside the groups it lets in as a lapsed membership
+  does, with no table of its own. The provider the Single sign-on card sets up is the account's
+  `sso` setting, its client secret sealed under SESSION_SECRET, beside `sso_join` and `sso_sign_in`.
+  `users.email_verified_at` keeps when someone joined with a link emailed to their address, which
+  saving their profile with another forgets, and is what linking by an address the provider verified
+  goes by, never linking an administrator.
+  Workspace migration 0079 adds what Memberful lacks. `identities.refresh_token` keeps the refresh
+  token each sign-in gave, sealed, and `refresh_due_at`, which an index serves, keeps when the
+  Workspace's alarm next asks the provider with it, without a queue. Settling one checks that the
+  token is still the one it asked with, so a sign-in meanwhile keeps its own. `sessions.identity_issuer`
+  and `identity_sid` say which provider and which of its sessions signed a session in, indexed
+  together, so a back-channel logout ends just those, or, by subject, the sessions any of that
+  account's sign-ins started, which a password's sessions never are. `identities.via` says which way
+  each account signs in, `memberful` for those from before, so the Memberful site Set up Memberful
+  keeps, while people are linked at it, is never a provider's issuer.
 - **Memberships are asked about, not taken from webhooks.** Memberful sends its webhooks in no
   particular order, so one only queues a check of a linked member in `membership_checks` (workspace
   migration 0038), keyed by issuer and subject, as `identities` is, which the Workspace's alarm asks
@@ -538,7 +797,11 @@ Objects, D1 or speed call for something else.
   the batch that resets the password, which deletes the person's as the recovery script's reset
   does, so two at once spend it once and a password that can't be saved leaves it working. Their
   subqueries find the person through the unique index on `users.email_address`, and saving one
-  deletes those that have expired, through the index on `expires_at`.
+  deletes those that have expired, through the index on `expires_at`. Asking for a code looks for
+  the account, and trying one counts the try, in a batch that first counts a time nobody was asked
+  for in `email_link_requests`, under a name no address is counted under, and deletes it: a Durable
+  Object keeps an answer back until what it wrote is stored for good, so writing only for an
+  address with an account, or a code, would answer later for it.
 - **A bot's cards are part of its message's row.** Cards, what a Slack-compatible webhook's legacy
   attachments show, are kept as JSON in `messages.cards` (room migration 0034), as a file is, rather
   than in the body as Action Text attachments, which the rich text pipeline would sanitize as
@@ -569,6 +832,24 @@ Objects, D1 or speed call for something else.
   in the `assistant` setting, beside the API token, at most 20 of them, so they're forgotten with
   the token when Ember AI is turned off. A pick that's no longer among them is kept, and followed
   again once the model is added back.
+- **Who can ask an AI agent is a column of its person.** Campfire has no AI agents.
+  `users.agent_access` (workspace migration 0063) is null for an agent anyone can ask, and for
+  everyone who isn't an agent, `'admins'` for one only administrators can ask, and `'admin-dms'` for
+  one only their direct messages reach, which is in no other room. It's on `users` rather than
+  `agents` so that it outlasts the agent: deleting an agent deletes its row in `agents` and keeps its
+  person, whose answers stay, and one that only administrators were told of stays untold. The
+  statements that list people, such as the directory's and the mention prompt's, and the one that
+  finds who answers a question, check it against the asker's role in SQL, so nobody is sent a person
+  they aren't told of.
+- **Whether a chat bot is kept to the open rooms picked is a column of its person.**
+  `users.rooms_picked` (workspace migration 0077) is 1 for a bot an administrator keeps to the open
+  rooms they pick, as `agents.every_open_room` 0 keeps an agent, and null for one in every open room,
+  and for everyone who isn't a chat bot. The statement that puts everyone active in a room made, or
+  opened to everyone, leaves those bots out, as it does those agents, and so does the one that lifts a
+  ban, since a ban keeps memberships. The rooms a bot's kept to are its memberships, as an agent's are.
+  Keeping it to fewer queues a `pending_revocations` row for each open room it leaves, in the same
+  batch, as taking someone out of a private room does, so a post its key was let in with just before
+  is turned away.
 
 ## Writing SQL here
 

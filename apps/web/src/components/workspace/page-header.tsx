@@ -8,8 +8,9 @@ import { SettingsLayout, SettingsNavigation } from "./settings-navigation";
 export const DrawerOpen = createContext(false);
 
 /**
- * The top bar, the navigation landmark "Page", holding what the page puts in it. At 900px and below it
- * starts with the button that opens the drawer, named for what it does next.
+ * The page's header, the navigation landmark "Page", under the top bar (top-bar.tsx), holding what the
+ * page puts in it. At 900px and below, where there's no top bar, it starts with the button that opens
+ * the drawer, named for what it does next.
  *
  * On a page of community settings it spans the column of their links too, ends with "Community
  * settings", and the links follow it (`SettingsNavigation`), where the conversations would be: there the
@@ -46,9 +47,9 @@ export function PageHeader({ children }: { children?: ReactNode }) {
   );
 }
 
-/** A `.btn` in the top bar holding only an icon: a 36px square, 44px for fingers, that a pointer highlights. */
+/** A `.btn` in the page's header holding only an icon: a 36px square, 44px for fingers, that a pointer highlights. */
 export const HEADER_BUTTON = "grid size-9 shrink-0 place-items-center rounded-lg hover:bg-hover touch:size-11";
 
-/** A `.btn` in the top bar holding an icon and its text, 44px tall for fingers. */
+/** A `.btn` in the page's header holding an icon and its text, 44px tall for fingers. */
 export const HEADER_TEXT_BUTTON =
   "inline-flex items-center justify-center gap-[0.5em] rounded-lg border border-transparent px-[1.1em] py-[0.5em] font-medium hover:bg-hover touch:min-h-11";

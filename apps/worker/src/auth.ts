@@ -117,5 +117,17 @@ export function isCrossSite(request: Request): boolean {
   return !(site === "same-origin" || (site === null && url.protocol === "http:"));
 }
 
+/**
+ * Whether a read comes from another site's page, by the same headers: another `Origin`, or a
+ * `Sec-Fetch-Site` other than `same-origin`, or `none` for an address typed in or bookmarked. One with
+ * neither header isn't a page's, as browsers send `Sec-Fetch-Site` to secure origins.
+ */
+export function isReadFromAnotherSite(request: Request): boolean {
+  const origin = request.headers.get("Origin");
+  if (origin !== null && origin !== urlOf(request).origin) return true;
+  const site = request.headers.get("Sec-Fetch-Site");
+  return site !== null && site !== "same-origin" && site !== "none";
+}
+
 /** Whether a WebSocket upgrade comes from the app's own pages, as Action Cable insists. */
 export const isSameOriginUpgrade = (request: Request) => request.headers.get("Origin") === urlOf(request).origin;

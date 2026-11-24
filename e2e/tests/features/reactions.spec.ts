@@ -83,6 +83,8 @@ test.describe("React to a message", () => {
     await add.focus();
     await ada.page.keyboard.press("Enter");
     await expect(tray.getByRole("button", { name: "Muscle" })).toBeFocused();
+    // Reacting shut the tooltip that named Thumbs up as the pointer reached it, which takes Escape until it has faded.
+    await expect(ada.page.getByRole("tooltip")).toHaveCount(0);
     await ada.page.keyboard.press("Escape");
     await expect(tray).toBeHidden();
     await expect(add).toBeFocused();

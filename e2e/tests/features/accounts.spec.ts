@@ -41,6 +41,8 @@ test.describe("Join link", () => {
   /** Opens Membership in Community settings, from the rail's Workspace link. */
   async function openMembership(page: Page) {
     await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Workspace" }).click();
+    // Community settings shows its links while it loads, then draws them again once it has, losing a click that comes as it does.
+    await expect(page).toHaveTitle("Community settings");
     await page.getByRole("navigation", { name: "Community settings" }).getByRole("link", { name: "Membership" }).click();
   }
 

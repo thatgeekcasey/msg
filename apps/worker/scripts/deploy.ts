@@ -13,22 +13,23 @@
 // meant to be read: the deploy prints the setup link that carries it, which is spent once Ember is set
 // up. The secrets go up with the code in one `wrangler deploy --secrets-file`, from a file only this
 // deploy can read, and nothing else here prints them: Cloudflare's build logs mask nothing, as GitHub's
-// would. A CI log can be public, as a public repository's Actions logs are, so there the deploy makes no
-// setup token, and says so, unless EMBER_SETUP_TOKEN in its environment brings one the deployer keeps as
-// a secret of their own. Workers Builds' log is the account's own, so it can carry the link. The keys of
-// a Memberful custom app, for its members to sign in (apps/worker/src/memberful.ts), and of a Turnstile
-// widget, for open sign-up's check, in place of any given in Set up Turnstile (apps/worker/src/turnstile.ts),
-// go up with every deploy whose environment gives them, as the Preview workflow's does from the
-// repository's secrets. So does the ID of the Cloudflare account the Worker goes to, as
-// CLOUDFLARE_ACCOUNT_ID, which a Worker can't learn by itself, for Set up Ember AI to fill in. Deploy
-// to Cloudflare's copy of Ember leaves out the .github folder, and with it the Update Ember workflow
-// that offers the copy Ember's releases, so a deploy without that workflow ends by saying how to add it.
-// A copy on GitHub tells the Worker its repository, the branch that deploys, and whether it has the
-// workflow, as vars, for General's release card to link to running the workflow, or to adding it.
-// Where STORAGE_BACKEND keeps messages in D1, the deploy makes the database the config names if the
-// account has none, refuses one in which an Ember the Worker isn't bound to is set up, and applies
-// Ember's migrations to it before the Worker that reads it deploys; on DO SQLite, it deploys without the
-// D1 database that Deploy to Cloudflare's form makes for every copy.
+// would. A CI log can be public, as a public repository's Actions logs are, and not every CI says it's
+// one, so there, and wherever its output isn't a terminal's, the deploy makes no setup token, and says
+// so, unless EMBER_SETUP_TOKEN in its environment brings one the deployer keeps as a secret of their
+// own. Workers Builds' log is the account's own, so it can carry the link. The keys of
+// a Memberful custom app, for its members to sign in, in place of any given in Set up Memberful
+// (apps/worker/src/memberful.ts), and of a Turnstile widget, for open sign-up's check, in place of any
+// given in Set up Turnstile (apps/worker/src/turnstile.ts), go up with every deploy whose environment
+// gives them, as the Preview workflow's does from the repository's secrets. So does the ID of the
+// Cloudflare account the Worker goes to, as CLOUDFLARE_ACCOUNT_ID, which a Worker can't learn by itself,
+// for Set up Ember AI to fill in. Deploy to Cloudflare's copy of Ember leaves out the .github folder,
+// and with it the Update Ember workflow that offers the copy Ember's releases, so a deploy without that
+// workflow ends by saying how to add it. A copy on GitHub tells the Worker its repository, the branch
+// that deploys, and whether it has the workflow, as vars, for General's release card to link to running
+// the workflow, or to adding it. Where STORAGE_BACKEND keeps messages in D1, the deploy makes the
+// database the config names if the account has none, refuses one in which an Ember the Worker isn't
+// bound to is set up, and applies Ember's migrations to it before the Worker that reads it deploys; on
+// DO SQLite, it deploys without the D1 database that Deploy to Cloudflare's form makes for every copy.
 
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -46,6 +47,8 @@ const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const EMBER = "https://github.com/NYLLON-SOFTWARE/ember-cloudflare";
 /** The workflow that offers a copy Ember's releases (docs/self-hosting.md#updating), and Ember's, kept beside this script. */
 const UPDATE_WORKFLOW = ".github/workflows/update-ember.yml";
+/** And the beta workflow, which brings a copy Ember's newest beta when it's run (docs/self-hosting.md#betas). */
+const BETA_WORKFLOW = ".github/workflows/update-ember-beta.yml";
 const EMBERS_UPDATE_WORKFLOW = new URL("./update-ember.yml", import.meta.url);
 
 /** Runs `pnpm exec wrangler` from the root, with its output captured or shown, and `env` besides this process's. */
@@ -88,12 +91,16 @@ function secretNames(target: string[]): string[] {
 /** The shape of EMBER_SETUP_TOKEN, as the Worker checks it (apps/worker/src/secrets.ts): `openssl rand -hex 32`. */
 const SETUP_TOKEN = /^[0-9a-f]{64}$/;
 
-/** Whether this deploy's output may be public: a CI log, except Workers Builds', which is the account's own. */
-const inPublicLog = () => !!process.env.CI && !process.env.WORKERS_CI;
+/**
+ * Whether this deploy's output may be public: a CI log, or whatever else isn't a terminal, as the log of a
+ * CI that doesn't say it's one, except Workers Builds', which is the account's own.
+ */
+const inPublicLog = () => (!!process.env.CI || !process.stdout.isTTY) && !process.env.WORKERS_CI;
 
 /**
- * The keys of a Memberful custom app, and the secret its site signs webhooks with, then a Turnstile
- * widget's, and a Resend API key, which only the deployer can give.
+ * The keys of a Memberful custom app, and the secret its site signs webhooks with, then the single
+ * sign-on provider's issuer and the app registered there, a Turnstile widget's keys, and a Resend API
+ * key, which only the deployer can give.
  */
 const GIVEN_KEYS = [
   "MEMBERFUL_URL",
@@ -101,6 +108,9 @@ const GIVEN_KEYS = [
   "MEMBERFUL_CLIENT_SECRET",
   "MEMBERFUL_API_KEY",
   "MEMBERFUL_WEBHOOK_SECRET",
+  "SSO_ISSUER",
+  "SSO_CLIENT_ID",
+  "SSO_CLIENT_SECRET",
   "TURNSTILE_SITE_KEY",
   "TURNSTILE_SECRET_KEY",
   "RESEND_API_KEY",
@@ -264,21 +274,23 @@ function copyRepository(): string | null {
 
 /** Whether the checkout has the Update Ember workflow. */
 const hasUpdateWorkflow = () => existsSync(path.join(ROOT, UPDATE_WORKFLOW));
+/** And the beta workflow. */
+const hasBetaWorkflow = () => existsSync(path.join(ROOT, BETA_WORKFLOW));
 
 /** The branch that deploys: the one Workers Builds deploys, else `main`. */
 const deployBranch = () => process.env.WORKERS_CI_BRANCH || "main";
 
 /**
  * The vars that tell the Worker of the copy it's deployed from, as `--var`s for wrangler deploy: its
- * repository on GitHub, the branch that deploys, and whether it has the Update Ember workflow, which
- * General's release card links to, or to adding it. None for a checkout that isn't a copy on GitHub, and
- * none that `args` give themselves.
+ * repository on GitHub, the branch that deploys, and whether it has the Update Ember workflow and the
+ * beta workflow, which General's release card links to, or to adding them. None for a checkout that
+ * isn't a copy on GitHub, and none that `args` give themselves.
  */
 function copyVars(args: string[]): string[] {
   const repository = copyRepository();
   if (!repository) return [];
   const given = varsGiven(args);
-  const vars = { GITHUB_REPOSITORY: repository, GIT_BRANCH: deployBranch(), UPDATE_WORKFLOW: String(hasUpdateWorkflow()) };
+  const vars = { GITHUB_REPOSITORY: repository, GIT_BRANCH: deployBranch(), UPDATE_WORKFLOW: String(hasUpdateWorkflow()), BETA_WORKFLOW: String(hasBetaWorkflow()) };
   return Object.entries(vars).flatMap(([name, value]) => (given.has(name) ? [] : ["--var", `${name}:${value}`]));
 }
 

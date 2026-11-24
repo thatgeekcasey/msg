@@ -1,7 +1,6 @@
 import {
   CANT_EMAIL_LINKS,
   EMAIL_LINK_GONE,
-  EMAIL_LINK_UNSENT,
   EMAIL_LINKS_LIMITED,
   JOINING_PROBLEMS,
   onlyAddressesAt,
@@ -30,6 +29,7 @@ const workspace: Omit<Bootstrap, "user"> = {
   setupPlaceholders: { name: "Kevin Rose", emailAddress: "kevin@kevinrose.com" },
   guestSignIn: false,
   signInWithMemberful: false,
+  signInWithSso: null,
   turnstileSiteKey: null,
   passwordResetCodes: false,
   account: {
@@ -38,16 +38,24 @@ const workspace: Omit<Bootstrap, "user"> = {
     hideTranslationButtons: true,
     customStyles: "",
     restrictRoomCreation: false,
+    restrictChannelMentions: false,
+    restrictEveryoneMention: false,
+    warnBeforeNotifying: true,
     logo: null,
     customDomain: null,
     joinLink: false,
     openSignUp: false,
     memberfulJoin: false,
     memberfulSignIn: false,
+    ssoJoin: false,
+    ssoSignIn: false,
     emailDomainSignUp: true,
     emailDomains: DOMAINS,
     navigationIcons: {},
     huddles: false,
+    huddleCameras: true,
+    huddleScreens: true,
+    huddleVideo: "hd",
   },
   version: "0.1",
   vapidPublicKey: null,
@@ -169,7 +177,6 @@ describe("Join with an email domain", () => {
     { status: 422, error: onlyAddressesAt(DOMAINS), field: "emailAddress" },
     { status: 429, error: EMAIL_LINKS_LIMITED },
     { status: 503, error: CANT_EMAIL_LINKS },
-    { status: 502, error: EMAIL_LINK_UNSENT },
   ])("says why Ember emailed no link, keeping the address typed: $error", async ({ status, ...body }) => {
     serve(() => Response.json(body, { status }));
     open();

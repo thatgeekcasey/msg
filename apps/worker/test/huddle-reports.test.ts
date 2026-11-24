@@ -6,7 +6,7 @@ import type { ChatRoom } from "../src/chat-room";
 import type { Env } from "../src/env";
 import { workspace } from "../src/workspace";
 import { MEMBERS_TO_TELL_OF_HUDDLE } from "../src/workspace-store";
-import { alarmOf, huddlesOn, joinHuddle, kept, ring, welcomed } from "./huddle-support";
+import { alarmOf, giveKeys, huddlesOn, joinHuddle, kept, OTHER_APP, ring, welcomed } from "./huddle-support";
 import { api, createRoom, freshDeploy, freshRoom, openWorkspaceSocket, roomStub, sharedD1, signIn, workspaceSql, workspaceStub, type Session, type WorkspaceSocket } from "./support";
 
 // Who's in a room's huddle, as the room tells the Workspace, and the Workspace everyone in the room, in
@@ -44,7 +44,11 @@ async function unreported(room: RoomId): Promise<() => Promise<void>> {
     const huddle = huddleOf(instance);
     original = huddle.env;
     const reached = workspace(original);
-    const cutOff = { huddleApp: () => reached.huddleApp(), reportHuddle: () => Promise.reject(new Error("The Workspace is unreachable")) };
+    const cutOff = {
+      huddleApp: () => reached.huddleApp(),
+      huddlesIn: (roomId: RoomId) => reached.huddlesIn(roomId),
+      reportHuddle: () => Promise.reject(new Error("The Workspace is unreachable")),
+    };
     huddle.env = { ...original, WORKSPACE: { getByName: () => cutOff } as unknown as Env["WORKSPACE"] };
   });
   return () => runInDurableObject(roomStub(room), (instance: ChatRoom) => void (huddleOf(instance).env = original!));
@@ -173,6 +177,26 @@ describe("Who's in a room's huddle, for the rest of the room", () => {
     expect((await sidebarOf(ada)).huddles).toEqual({});
   });
 
+  it("says that a huddle goes on with whoever joins it once huddles run through another app, and never that it's over", async () => {
+    const { ada } = await huddlesOn();
+    const grace = await signIn("Grace");
+    const room = await freshRoom("another-app");
+    const gracesTab = await openWorkspaceSocket(grace);
+    const adas = await joinHuddle(room, ada);
+    const { startedAt } = await adas.next("huddle.welcome");
+    expect(await nextHuddle(gracesTab)).toEqual(told(room, { startedAt, userIds: [ada.user.id] }));
+
+    await giveKeys(ada, OTHER_APP);
+    // The room goes by what the Workspace last said of the app for half a minute, unless it has restarted since.
+    await evictDurableObject(roomStub(room));
+    await welcomed(room, grace);
+    expect(await nextHuddle(gracesTab)).toEqual(told(room, { startedAt, userIds: [grace.user.id] }));
+    // Ada's tab connects again, as her socket's closing has it do.
+    expect(await adas.closed).toMatchObject({ code: CloseCode.Reconnect });
+    await welcomed(room, ada);
+    expect(await nextHuddle(gracesTab)).toEqual(told(room, { startedAt, userIds: [grace.user.id, ada.user.id] }));
+  });
+
   it("says who's in the huddle again at each check, which tells the room of whatever a report failed to", async () => {
     const { ada } = await huddlesOn();
     const failures = countFailures();
@@ -271,10 +295,13 @@ describe("Who's in a room's huddle, for the rest of the room", () => {
     // A report made earlier than the one kept, or no later, counts for nothing, and answers when that one was made.
     expect(await report(1000, ["a", "b"])).toBe(2000);
     expect(await report(2000, ["b"])).toBe(2000);
-    // One that says what's kept already changes nothing.
+    // One that says what's kept already tells nobody anything, but its time is kept, so one made before it that
+    // arrives after it changes nothing either.
     expect(await report(3000, ["a"])).toBeNull();
     await heardNothing(adasTab);
-    expect([(await sidebarOf(ada)).huddles, await reportedAt()]).toEqual([{ [room]: { startedAt, userIds: ["a"] } }, 2000]);
+    expect(await report(2500, ["b"])).toBe(3000);
+    await heardNothing(adasTab);
+    expect([(await sidebarOf(ada)).huddles, await reportedAt()]).toEqual([{ [room]: { startedAt, userIds: ["a"] } }, 3000]);
 
     // Nor does a report from before a huddle ended bring it back.
     expect(await report(4000, null)).toBeNull();

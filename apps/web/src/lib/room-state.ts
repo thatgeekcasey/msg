@@ -1,4 +1,4 @@
-import { HISTORY_PAGE_SIZE, parentTextOf, type Message, type ServerFrame, type TimelinePage, type User } from "@ember/protocol";
+import { HISTORY_PAGE_SIZE, parentTextOf, type EphemeralMessage, type Message, type ScheduledMessage, type ServerFrame, type TimelinePage, type User } from "@ember/protocol";
 
 /** `gone` is a room that isn't there for this person any more, deleted or no longer theirs, which nothing reconnects to. */
 export type ConnectionStatus = "connecting" | "open" | "reconnecting" | "gone";
@@ -19,6 +19,11 @@ export interface PendingMessage extends Message {
   sentOver?: number;
   /** A file on its way to becoming a message of its own, which its card shows in the message's place. */
   upload?: PendingUpload;
+  /**
+   * Why the room wouldn't take it for what it says, as with a word Blocked words keeps out, while it waits
+   * to go back to the composer, for its writer to change.
+   */
+  rewrite?: string;
 }
 
 /** A file being uploaded, as its card shows it. */
@@ -42,15 +47,29 @@ export interface Focus {
 /** What a message that couldn't go says, as the room's own refusals do. */
 const NOT_SENT = "Not connected. Your message wasn't sent.";
 
+/**
+ * Someone the room says is typing, and, for @ember or an agent answering, what it's doing meanwhile, if
+ * it's more than writing, in words that follow its name, as "is using Digg: digg_get_feed" does.
+ */
+export interface Typist {
+  user: User;
+  doing?: string;
+}
+
 export interface RoomState {
   status: ConnectionStatus;
   /** Whether the room has been without a connection for 5 seconds, which stops sending until it's back. */
   offline: boolean;
   /** The timeline's messages, oldest first, followed by those this page sent that the room hasn't confirmed. */
   messages: Array<Message | PendingMessage>;
+  /**
+   * The messages only this page's person sees, as the card of a call that waits on them, as they came,
+   * until the room lets the page in again, which brings again those still waiting.
+   */
+  ephemeral: EphemeralMessage[];
   present: User[];
   /** Who is typing, with when we last heard so stale entries can expire. */
-  typing: Record<string, { user: User; at: number }>;
+  typing: Record<string, Typist & { at: number }>;
   /** Whether the room has messages older than the timeline holds. */
   hasMore: boolean;
   /**
@@ -72,7 +91,10 @@ export interface RoomState {
   loadingPage: boolean;
   /** Where the timeline goes next, or null until the room has said what it holds. */
   focus: Focus | null;
-  /** How many times messages have come from the room, other than this page's own: the timeline shows Jump to newest message when one comes out of view. */
+  /**
+   * How many times messages have come from the room, other than this page's own, those only its person sees
+   * included: the timeline shows Jump to newest message when one comes out of view.
+   */
   arrivals: number;
   notice: string | null;
   /**
@@ -90,6 +112,8 @@ export interface RoomState {
    * address. It doesn't say which reaction, so a deletion sent before the latest may not happen.
    */
   refusedUnboosts: number;
+  /** The messages you have scheduled in the room, soonest first, as it last listed them. */
+  scheduled: ScheduledMessage[];
   /**
    * Set for a timeline that keeps every message it's sent, as a thread's does: it has no way to page
    * forward, so it can't cut its newest, and then it can't cut its oldest either, which may be the ones
@@ -119,12 +143,21 @@ export type RoomAction =
   | { type: "expire-typing"; before: number }
   /** Says why something written didn't go, as the room says why it refused something. */
   | { type: "warn"; message: string }
-  | { type: "dismiss-notice" };
+  | { type: "dismiss-notice" }
+  /**
+   * A message the room wouldn't take for what it says, `taken` back by the composer, which says why in the
+   * notice's place, or else left showing as not sent.
+   */
+  | { type: "given-back"; clientMessageId: string; taken: boolean };
+
+/** No messages only this page's person sees, as one list, so that a timeline without any keeps it as the room lets it in again. */
+const NO_EPHEMERAL: EphemeralMessage[] = [];
 
 export const initialRoomState: RoomState = {
   status: "connecting",
   offline: false,
   messages: [],
+  ephemeral: NO_EPHEMERAL,
   present: [],
   typing: {},
   hasMore: false,
@@ -140,9 +173,13 @@ export const initialRoomState: RoomState = {
   paged: null,
   connections: 0,
   refusedUnboosts: 0,
+  scheduled: [],
 };
 
 export const isPending = (m: Message | PendingMessage): m is PendingMessage => "pending" in m;
+
+/** Whether `m` waits to go back to the composer, as the room wouldn't take it for what it says. */
+export const isToRewrite = (m: Message | PendingMessage): m is PendingMessage & { rewrite: string } => isPending(m) && m.rewrite !== undefined;
 
 /**
  * Whether `stored` is the room's copy of the optimistic message `m`. Anyone can send a
@@ -271,21 +308,31 @@ function withoutTyping(typing: RoomState["typing"], userId: string) {
   return rest;
 }
 
-/** Who is typing once the room has said that `frame`'s user started or stopped, heard at `now`. */
-export function typed(typing: RoomState["typing"], { user, typing: started }: Extract<ServerFrame, { type: "typing" }>, now: number): RoomState["typing"] {
-  return started ? { ...typing, [user.id]: { user, at: now } } : withoutTyping(typing, user.id);
+/** Who is typing once the room has said that `frame`'s user started or stopped, and what they're doing meanwhile, heard at `now`. */
+export function typed(typing: RoomState["typing"], { user, typing: started, doing }: Extract<ServerFrame, { type: "typing" }>, now: number): RoomState["typing"] {
+  return started ? { ...typing, [user.id]: { user, at: now, ...(doing !== undefined && { doing }) } } : withoutTyping(typing, user.id);
 }
 
 /**
- * The timeline as the room lets a connection in with a welcome, `page` in its place, and `present` there.
- * Unconfirmed messages stay across a reconnect, and everything else comes fresh from the room: the old
- * socket may have closed after the room stored one, so those it sent stay as sending while useRoom asks
- * the room about them.
+ * The timeline with `message`, which only this page's person sees, in the place of the one with its id, or
+ * else new, which counts as an arrival, as a message from the room does.
  */
-export function welcomed(state: RoomState, page: TimelinePage, present: User[]): RoomState {
+export function withEphemeral(state: RoomState, message: EphemeralMessage): RoomState {
+  if (!state.ephemeral.some((m) => m.id === message.id)) return { ...state, ephemeral: [...state.ephemeral, message], arrivals: state.arrivals + 1 };
+  return { ...state, ephemeral: state.ephemeral.map((m) => (m.id === message.id ? message : m)) };
+}
+
+/**
+ * The timeline as the room lets a connection in with a welcome, `page` in its place, `present` there, and
+ * `ephemeral` for this page's person alone. Unconfirmed messages stay across a reconnect, and everything
+ * else comes fresh from the room: the old socket may have closed after the room stored one, so those it
+ * sent stay as sending while useRoom asks the room about them.
+ */
+export function welcomed(state: RoomState, page: TimelinePage, present: User[], ephemeral = NO_EPHEMERAL): RoomState {
   return {
     ...state,
     ...showing(state, page),
+    ephemeral,
     status: "open",
     present,
     // A history request on the old socket will never be answered.
@@ -300,16 +347,18 @@ export function welcomed(state: RoomState, page: TimelinePage, present: User[]):
 }
 
 /**
- * The timeline as the room lets a connection in again with what `changed` while it was away, and `present`
- * there. The pages already loaded stay, older ones included, where a welcome would replace them.
+ * The timeline as the room lets a connection in again with what `changed` while it was away, `present`
+ * there, and `ephemeral`, as with a welcome. The pages already loaded stay, older ones included, where a
+ * welcome would replace them.
  */
-export function resumed(state: RoomState, changed: Changes, present: User[]): RoomState {
+export function resumed(state: RoomState, changed: Changes, present: User[], ephemeral = NO_EPHEMERAL): RoomState {
   const { messages, came } = caughtUp(state, changed);
   return cut(
     {
       ...state,
       status: "open",
       messages,
+      ephemeral,
       present,
       // A history request on the old socket will never be answered.
       loadingOlder: false,
@@ -385,6 +434,13 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
       return { ...state, notice: action.message };
     case "dismiss-notice":
       return { ...state, notice: null };
+    case "given-back": {
+      const given = state.messages.find((m): m is PendingMessage => isPending(m) && m.clientMessageId === action.clientMessageId);
+      if (!given?.rewrite) return state;
+      // One the outbox kept comes back without the room's notice, which says why it's not sent.
+      if (!action.taken) return { ...state, messages: state.messages.map((m) => (m === given ? { ...given, rewrite: undefined } : m)), notice: state.notice ?? given.rewrite };
+      return { ...state, messages: state.messages.filter((m) => m !== given), notice: state.notice === given.rewrite ? null : state.notice };
+    }
     case "expire-typing": {
       const fresh = Object.entries(state.typing).filter(([, t]) => t.at >= action.before);
       // This comes every second, so a room where nothing expired keeps its state and doesn't re-render.
@@ -398,15 +454,20 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
 function applyFrame(state: RoomState, frame: ServerFrame, now: number): RoomState {
   switch (frame.type) {
     case "welcome":
-      return welcomed(state, frame, frame.present);
+      return { ...welcomed(state, frame, frame.present, frame.ephemeral), scheduled: frame.scheduled ?? [] };
     case "resumed":
-      return resumed(state, frame, frame.present);
+      return { ...resumed(state, frame, frame.present, frame.ephemeral), scheduled: frame.scheduled ?? [] };
+    case "scheduled":
+      return { ...state, scheduled: frame.messages };
     case "message.created":
       return received(state, frame.message);
     case "message.updated":
       return { ...state, messages: retold(replace(state.messages, frame.message.id, () => frame.message), [frame.message]) };
     case "message.deleted":
       return { ...state, messages: state.messages.filter((m) => m.id !== frame.messageId) };
+    // One about a question asked in a thread is the thread's to show (`threadReducer`).
+    case "message.ephemeral":
+      return frame.message.parentId === undefined ? withEphemeral(state, frame.message) : state;
     case "boost.created":
       return {
         ...state,
@@ -456,15 +517,19 @@ function applyFrame(state: RoomState, frame: ServerFrame, now: number): RoomStat
     case "history.around":
       return { ...state, ...showing(state, frame), loadingPage: false };
     case "error": {
-      // A message the room refused shows as not sent, as do the ones it couldn't check. An error about no
+      // A message the room refused shows as not sent, as do the ones it couldn't check, unless it's refused
+      // for what it says, when the composer it came from takes it back if it can. An error about no
       // message keeps the same list: the timeline takes a new one for a change, and would ask again for a
       // page that just failed. One about a thread, or about messages the timeline isn't sending, as
-      // replies in a thread, is the thread's to show.
+      // replies in a thread, is the thread's to show, one about a link's preview, which the tab sent of its
+      // own accord, isn't shown, and one about an edit to a scheduled message is their list's to show, as
+      // it keeps the edit.
       const notSent = frame.clientMessageIds ?? (frame.clientMessageId === undefined ? [] : [frame.clientMessageId]);
-      if (frame.failed === "thread.open" || frame.failed === "thread.before") return state;
+      if (frame.failed === "thread.open" || frame.failed === "thread.before" || frame.failed === "message.preview" || frame.failed === "scheduled.edit") return state;
       if (notSent.length > 0 && !state.messages.some((m) => isPending(m) && notSent.includes(m.clientMessageId))) return state;
+      const refused = frame.rewrite ? { failed: true, rewrite: frame.message } : { failed: true };
       const messages = notSent.length
-        ? state.messages.map((m) => (isPending(m) && notSent.includes(m.clientMessageId) ? { ...m, failed: true } : m))
+        ? state.messages.map((m) => (isPending(m) && notSent.includes(m.clientMessageId) ? { ...m, ...refused } : m))
         : state.messages;
       // A failed history request leaves nothing in flight, so paging can be tried again.
       return {
@@ -477,9 +542,10 @@ function applyFrame(state: RoomState, frame: ServerFrame, now: number): RoomStat
         refusedUnboosts: frame.failed === "boost.delete" ? state.refusedUnboosts + 1 : state.refusedUnboosts,
       };
     }
-    // A thread's, which its own state keeps.
+    // A thread's, which its own state keeps, and a click's answer, which its button waits for.
     case "thread.opened":
     case "thread.history":
+    case "card.clicked":
     case "pong":
       return state;
   }

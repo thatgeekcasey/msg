@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { avatarVariantOf, fitted, previewOf } from "./previews";
+import { choosePoster } from "./clips";
+import { avatarVariantOf, fitted, posterTime, previewOf } from "./previews";
 
 // jsdom decodes no pictures, plays no videos and draws nothing, so these stand in for the browser's,
 // and e2e/ makes real previews.
@@ -138,6 +139,30 @@ describe("Image, video and file previews", () => {
     const short = previewOf(file("blink.webm", "video/webm"));
     expect(await plays(videos[1]!, { duration: 0.06 })).toBe(0.03);
     expect((await short)?.type).toBe("image/jpeg");
+  });
+
+  it("makes a clip's poster from where its thumbnail was chosen as it was recorded, within the clip", async () => {
+    const clip = file("Video clip.mp4", "video/mp4");
+    choosePoster(clip, 2.5);
+    const making = previewOf(clip);
+    expect(await plays(videos[0]!)).toBe(2.5);
+    expect(await making).not.toBeNull();
+
+    const shorter = file("Video clip.webm", "video/webm");
+    choosePoster(shorter, 30);
+    const late = previewOf(shorter);
+    expect(await plays(videos[1]!, { duration: 12 })).toBe(12);
+    expect(await late).not.toBeNull();
+  });
+
+  it("takes a poster a tenth of a second in, or halfway through a shorter video, or where a clip's thumbnail was chosen, whether or not the video says how long it is", () => {
+    expect(posterTime(12)).toBe(0.1);
+    expect(posterTime(0.06)).toBe(0.03);
+    expect(posterTime(12, 2.5)).toBe(2.5);
+    expect(posterTime(2, 2.5)).toBe(2);
+    // As a WebM recorded in a browser doesn't, until it's been read to its end.
+    expect(posterTime(Number.POSITIVE_INFINITY)).toBe(0.1);
+    expect(posterTime(Number.POSITIVE_INFINITY, 2.5)).toBe(2.5);
   });
 
   it("makes none for a file that isn't a picture or a video, or that the browser can't decode or doesn't within five seconds", async () => {

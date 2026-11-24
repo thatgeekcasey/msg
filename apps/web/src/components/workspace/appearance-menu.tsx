@@ -27,7 +27,7 @@ export function AppearanceMenu() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         ref={button}
-        className="mt-auto flex size-9 shrink-0 items-center justify-center rounded-full border text-muted-foreground hover:bg-hover hover:text-foreground data-[state=open]:bg-hover data-[state=open]:text-foreground touch:size-11"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full border text-muted-foreground hover:bg-hover hover:text-foreground data-[state=open]:bg-hover data-[state=open]:text-foreground touch:size-11"
         aria-label={`Appearance: ${label}`}
         title={`Appearance: ${label}`}
       >

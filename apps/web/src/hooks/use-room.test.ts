@@ -1,5 +1,20 @@
-import { CloseCode, MAX_CHECKED_MESSAGES, MAX_MESSAGE_HTML_LENGTH, MAX_MESSAGE_LENGTH, MESSAGE_TOO_LONG, type Message, type ServerFrame, type User } from "@ember/protocol";
+import {
+  CloseCode,
+  MAX_CHECKED_MESSAGES,
+  MAX_MESSAGE_HTML_LENGTH,
+  MAX_MESSAGE_LENGTH,
+  MESSAGE_TOO_LONG,
+  SCHEDULE_TIME_REFUSED,
+  SCHEDULED_GONE,
+  type LinkPreview,
+  type Message,
+  type ScheduledMessage,
+  type ServerFrame,
+  type User,
+} from "@ember/protocol";
+import { BLOCKED_WORDS_REFUSED } from "@ember/protocol/blocked-words";
 import { act, cleanup, renderHook } from "@testing-library/react";
+import type { AddPreview } from "@/components/workspace/composer";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { takeBack } from "@/lib/outbox";
@@ -7,7 +22,7 @@ import { OFFLINE_AFTER_MS } from "@/lib/reconnecting-socket";
 import { isPending } from "@/lib/room-state";
 import { CONNECTION_LOST, UPLOAD_FAILED, UploadError, uploadFile } from "@/lib/uploads";
 import { VISIBILITY_CHANGE_DELAY_MS } from "@/lib/visibility";
-import { openRoomSocketAhead, useRoom } from "./use-room";
+import { NOT_CONNECTED, openRoomSocketAhead, useRoom, type ScheduledReply } from "./use-room";
 import { useThread } from "./use-thread";
 
 vi.mock("@/lib/uploads", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/uploads")>()), uploadFile: vi.fn() }));
@@ -125,7 +140,7 @@ afterEach(() => {
 describe("Catch up after a reconnect", () => {
   it("opens the room's socket, which the session cookie signs in", () => {
     joinGeneral({ connect: false });
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5");
   });
 
   it("is connecting until the room says welcome", () => {
@@ -294,13 +309,13 @@ describe("Catch up after a reconnect", () => {
     joinGeneral();
     socket().drop();
     wait(500);
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4&since=0");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5&since=0");
     socket().open();
     socket().receive({ type: "resumed", you: ada, messages: [message("m1")], deletedIds: [], present: [ada], seq: 3 });
     socket().receive({ type: "message.deleted", messageId: "m1", seq: 4 });
     socket().drop();
     wait(500);
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4&since=4");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5&since=4");
   });
 
   it("names the change before one the room never announced, so connecting again brings it", () => {
@@ -311,7 +326,7 @@ describe("Catch up after a reconnect", () => {
     socket().receive({ type: "message.deleted", messageId: "m1", seq: 4 });
     socket().drop();
     wait(500);
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4&since=1");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5&since=1");
   });
 
   it("names no change until the room has let it in, nor in the next room it opens", () => {
@@ -319,12 +334,12 @@ describe("Catch up after a reconnect", () => {
     socket().open();
     socket().drop();
     wait(500);
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5");
     socket().open();
     socket().receive({ type: "welcome", you: ada, messages: [], present: [ada], hasMore: false, hasNewer: false, around: null, seq: 7 });
 
     rerender({ roomId: "random" });
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/random/socket?visible=1&protocol=4");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/random/socket?visible=1&protocol=5");
   });
 
   it("catches up on what changed while it was away, keeping what's loaded, and asks about a message it doesn't confirm", () => {
@@ -444,7 +459,7 @@ describe("Leave a room with messages waiting", () => {
   it("sends what was written while the room was away once it's back, after the room is left, over a socket of its own", async () => {
     const [written] = await leaveWhileAway("Written while away");
     const [outbox] = outboxSockets();
-    expect(outbox!.url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=4");
+    expect(outbox!.url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=5");
     outbox!.open();
     outbox!.receive(welcome());
     expect(outbox!.sent).toEqual([{ type: "message.create", clientMessageId: written!.clientMessageId, body: "Written while away" }]);
@@ -580,7 +595,7 @@ describe("Open a room", () => {
 
   it("opens it as a hidden tab's, so that the room reads nothing for it until the room shows in a tab that's shown", async () => {
     openRoomSocketAhead("/rooms/general");
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=4");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=5");
     socket().open();
     socket().receive(welcome());
     expect(socket().sent).toEqual([]);
@@ -595,7 +610,7 @@ describe("Open a room", () => {
   it("takes one opened ahead at a message's permalink as it opens there", () => {
     openRoomSocketAhead("/rooms/general/@m1");
     renderHook(() => useRoom("general", ada, () => {}, "m1"));
-    expect(FakeSocket.all.map((s) => s.url)).toEqual(["ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=4&around=m1"]);
+    expect(FakeSocket.all.map((s) => s.url)).toEqual(["ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=5&around=m1"]);
   });
 
   it("opens none ahead for a page that shows no room", () => {
@@ -795,24 +810,49 @@ const overformatted = `<p>${"<b></b>".repeat(Math.ceil(MAX_MESSAGE_HTML_LENGTH /
 describe("Send a message", () => {
   it(`says a message over ${MAX_MESSAGE_LENGTH} characters, or in more markup than a frame carries, is too long instead of sending it`, () => {
     const { result } = joinGeneral();
-    let sent: boolean | undefined;
+    let sent: AddPreview | null | undefined;
     act(() => {
       sent = result.current.postMessage(paragraphOf(MAX_MESSAGE_LENGTH + 1));
     });
-    expect(sent).toBe(false);
+    expect(sent).toBeNull();
     expect(socket().sentOfType("message.create")).toEqual([]);
     expect(result.current.state.messages).toEqual([]);
-    expect(result.current.state.notice).toBe("Messages can be up to 10,000 characters.");
+    expect(result.current.state.notice).toBe("Messages can be up to 40,000 characters.");
     act(() => {
       sent = result.current.postMessage(overformatted);
     });
-    expect(sent).toBe(false);
+    expect(sent).toBeNull();
 
     act(() => {
       sent = result.current.postMessage(paragraphOf(MAX_MESSAGE_LENGTH));
     });
-    expect(sent).toBe(true);
+    expect(sent).toBeTypeOf("function");
     expect(socket().sentOfType("message.create")).toHaveLength(1);
+  });
+});
+
+describe("Link previews after sending", () => {
+  const preview: LinkPreview = { title: "Basecamp", url: "https://basecamp.com/", image: null, description: "Calm & organized" };
+
+  it("sends the preview of a link that comes once the message has gone, naming the message, unless it's offline", () => {
+    const { result } = joinGeneral();
+    let addPreview!: AddPreview;
+    act(() => {
+      addPreview = result.current.postMessage("<p>https://basecamp.com</p>")!;
+    });
+    addPreview(preview);
+    const { clientMessageId } = socket().sentOfType("message.create")[0]!;
+    expect(socket().sentOfType("message.preview")).toEqual([{ type: "message.preview", clientMessageId, preview }]);
+
+    socket().drop();
+    addPreview(preview);
+    expect(socket().sentOfType("message.preview")).toHaveLength(1);
+  });
+
+  it("shows nothing when the room can't add one, as the page sent it of its own accord", () => {
+    const { result } = joinGeneral();
+    socket().receive({ type: "error", message: "Something went wrong", failed: "message.preview" });
+    expect(result.current.state.notice).toBeNull();
   });
 });
 
@@ -1062,16 +1102,16 @@ describe("Scroll back through history", () => {
 describe("Link to a message", () => {
   it("opens the room around the message its permalink names, and connects again without it once in", () => {
     renderHook(() => useRoom("general", ada, () => {}, "m 5"));
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4&around=m%205");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5&around=m%205");
     // Until the room lets the page in, connecting again still asks for it.
     socket().drop();
     wait(500);
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4&around=m%205");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5&around=m%205");
     socket().open();
     socket().receive({ type: "welcome", you: ada, messages: [message("m 5")], present: [ada], hasMore: false, hasNewer: true, around: "m 5", seq: 4 });
     socket().drop();
     wait(500);
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4&since=4");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5&since=4");
   });
 
   it("goes to a message it holds without asking the room, and asks for the page around one it doesn't", () => {
@@ -1174,7 +1214,7 @@ describe("Edit a message", () => {
     });
     expect(sent).toBe(false);
     expect(socket().sentOfType("message.update")).toEqual([]);
-    expect(result.current.state.notice).toBe("Messages can be up to 10,000 characters.");
+    expect(result.current.state.notice).toBe("Messages can be up to 40,000 characters.");
   });
 
   it("shows the room's refusal", () => {
@@ -1209,6 +1249,250 @@ describe("React to a message", () => {
   });
 });
 
+describe("Click a card's button", () => {
+  const approve = { id: "approve", blockId: "deploy-42", value: '{"build":42}' };
+
+  /** Clicks Approve on m1, answering what the click comes to and the frame it sent, which names the button by its value too. */
+  function clickApprove(result: ReturnType<typeof joinGeneral>["result"]) {
+    let went: Promise<boolean> | undefined;
+    act(() => {
+      went = result.current.messageActions.click("m1", approve);
+    });
+    const [sent] = socket().sentOfType("card.click").slice(-1);
+    expect(sent).toEqual({ type: "card.click", clickId: expect.any(String), messageId: "m1", actionId: "approve", blockId: "deploy-42", value: approve.value });
+    return { went: went!, clickId: (sent as { clickId: string }).clickId };
+  }
+
+  it("sends the click to the room, and waits for the room to say the bot has answered", async () => {
+    const { result } = joinGeneral({ messages: [message("m1")] });
+    const { went, clickId } = clickApprove(result);
+    // Another click's answer isn't this one's.
+    act(() => socket().receive({ type: "card.clicked", clickId: "another" }));
+    let settled = false;
+    void went.then(() => (settled = true));
+    await act(async () => {});
+    expect(settled).toBe(false);
+    act(() => socket().receive({ type: "card.clicked", clickId }));
+    expect(await went).toBe(true);
+    expect(result.current.state.notice).toBeNull();
+  });
+
+  it("shows why a click came to nothing, as the room says", async () => {
+    const { result } = joinGeneral({ messages: [message("m1")] });
+    const { went, clickId } = clickApprove(result);
+    act(() => socket().receive({ type: "error", message: "Deploy Bot didn't answer in time", clickId, failed: "card.click" }));
+    expect(await went).toBe(false);
+    expect(result.current.state.notice).toBe("Deploy Bot didn't answer in time");
+  });
+
+  it("stops waiting once the room lets the page in again, which loses the click's answer", async () => {
+    const { result } = joinGeneral({ messages: [message("m1")] });
+    const { went } = clickApprove(result);
+    act(() => socket().receive({ type: "resumed", you: ada, messages: [], deletedIds: [], present: [ada], seq: 0 }));
+    expect(await went).toBe(false);
+  });
+
+  it("says a click made while the room is away didn't go", async () => {
+    const { result } = joinGeneral({ connect: false });
+    let went: Promise<boolean> | undefined;
+    act(() => {
+      went = result.current.messageActions.click("m1", approve);
+    });
+    expect(await went).toBe(false);
+    expect(result.current.state.notice).toBe("Not connected. Try again once you're reconnected.");
+  });
+});
+
+describe("Schedule a message", () => {
+  const at = new Date("2026-11-18T17:00:00.000Z");
+  const scheduledAs = (clientMessageId: string, overrides: Partial<ScheduledMessage> = {}): ScheduledMessage => ({
+    id: clientMessageId,
+    clientMessageId,
+    body: "<p>Later</p>",
+    sendAt: at.toISOString(),
+    ...overrides,
+  });
+
+  /** Schedules "Later" for `at`, answering what that settles with and the frame it sent. */
+  function scheduleLater(result: ReturnType<typeof joinGeneral>["result"], reply?: ScheduledReply) {
+    let settled: Promise<string | null> | undefined;
+    act(() => {
+      settled = result.current.scheduling.schedule("<p>Later</p>", at, reply);
+    });
+    const [sent] = socket().sentOfType("message.schedule").slice(-1);
+    return { settled: settled!, sent: sent as { clientMessageId: string } };
+  }
+
+  it("sends it to the room, and waits for the room to list it among those scheduled", async () => {
+    const { result } = joinGeneral();
+    const { settled, sent } = scheduleLater(result, { parentId: "m1", alsoSend: true });
+    expect(sent).toEqual({ type: "message.schedule", clientMessageId: expect.any(String), body: "<p>Later</p>", sendAt: "2026-11-18T17:00:00.000Z", parentId: "m1", alsoSend: true });
+    // Another's listing isn't this one's.
+    act(() => socket().receive({ type: "scheduled", messages: [scheduledAs("another")] }));
+    let answer: string | null | undefined;
+    void settled.then((settledWith) => (answer = settledWith));
+    await act(async () => {});
+    expect(answer).toBeUndefined();
+    const listed = [scheduledAs("another"), scheduledAs(sent.clientMessageId, { parentId: "m1", alsoSend: true })];
+    act(() => socket().receive({ type: "scheduled", messages: listed }));
+    expect(await settled).toBeNull();
+    expect(result.current.state.scheduled).toEqual(listed);
+  });
+
+  it("says why the room refused it, there rather than over the timeline", async () => {
+    const { result } = joinGeneral();
+    const { settled, sent } = scheduleLater(result);
+    act(() => socket().receive({ type: "error", message: SCHEDULE_TIME_REFUSED, clientMessageId: sent.clientMessageId, failed: "message.schedule" }));
+    expect(await settled).toBe(SCHEDULE_TIME_REFUSED);
+    expect(result.current.state.notice).toBeNull();
+  });
+
+  it("says one too long for the room is, without sending it, and one written while the room is away wasn't scheduled", async () => {
+    const { result } = joinGeneral();
+    let settled: Promise<string | null> | undefined;
+    act(() => {
+      settled = result.current.scheduling.schedule(paragraphOf(MAX_MESSAGE_LENGTH + 1), at);
+    });
+    expect(await settled).toBe(MESSAGE_TOO_LONG);
+    expect(socket().sentOfType("message.schedule")).toEqual([]);
+    socket().drop();
+    act(() => {
+      settled = result.current.scheduling.schedule("<p>Later</p>", at);
+    });
+    expect(await settled).toBe(NOT_CONNECTED);
+  });
+
+  it("finds out as the room lets the page in again whether it had one sent before, as it lists what's scheduled, has it among its messages, sent since, or says, asked", async () => {
+    const { result } = joinGeneral();
+    const lost = scheduleLater(result);
+    const kept = scheduleLater(result);
+    const due = scheduleLater(result);
+    const since = [message("m9", { clientMessageId: due.sent.clientMessageId })];
+    act(() => socket().receive({ type: "resumed", you: ada, messages: since, deletedIds: [], present: [ada], seq: 0, scheduled: [scheduledAs(kept.sent.clientMessageId)] }));
+    expect(await kept.settled).toBeNull();
+    expect(await due.settled).toBeNull();
+    expect(result.current.state.scheduled).toEqual([scheduledAs(kept.sent.clientMessageId)]);
+    // One it neither lists nor has among them it may have sent before them, so it's asked.
+    expect(socket().sentOfType("message.check")).toEqual([{ type: "message.check", clientMessageIds: [lost.sent.clientMessageId] }]);
+    act(() => socket().receive({ type: "message.checked", stored: [], missing: [lost.sent.clientMessageId] }));
+    expect(await lost.settled).toBe(NOT_CONNECTED);
+    // A welcome that lists none means there are none.
+    socket().receive(welcome());
+    expect(result.current.state.scheduled).toEqual([]);
+  });
+
+  it("says why where the room couldn't say whether it had sent one it doesn't list as it lets the page in again", async () => {
+    const { result } = joinGeneral();
+    const lost = scheduleLater(result);
+    act(() => socket().receive(welcome()));
+    act(() => socket().receive({ type: "error", message: "Something went wrong", failed: "message.check", clientMessageIds: [lost.sent.clientMessageId] }));
+    expect(await lost.settled).toBe("Something went wrong");
+  });
+
+  it("finds out as the page comes back to the room whether it had those asked for as the room was left, as its welcome lists them, or it says, asked, as of a reply in its thread alone that came due meanwhile", async () => {
+    const left = joinGeneral();
+    const kept = scheduleLater(left.result);
+    const lost = scheduleLater(left.result);
+    const due = scheduleLater(left.result, { parentId: "m1", alsoSend: false });
+    left.unmount();
+    joinGeneral({ connect: false });
+    socket().open();
+    // The reply isn't among the messages the room sends, as it went in its thread alone.
+    act(() => socket().receive({ type: "welcome", you: ada, messages: [message("m1")], present: [ada], hasMore: false, hasNewer: false, around: null, seq: 0, scheduled: [scheduledAs(kept.sent.clientMessageId)] }));
+    expect(socket().sentOfType("message.check")).toEqual([
+      { type: "message.check", clientMessageIds: [lost.sent.clientMessageId] },
+      { type: "message.check", clientMessageIds: [due.sent.clientMessageId] },
+    ]);
+    act(() => socket().receive({ type: "message.checked", stored: [], missing: [lost.sent.clientMessageId] }));
+    act(() => socket().receive({ type: "message.checked", stored: [due.sent.clientMessageId], missing: [] }));
+    const answers: Array<string | null> = [];
+    void kept.settled.then((answer) => (answers[0] = answer));
+    void lost.settled.then((answer) => (answers[1] = answer));
+    void due.settled.then((answer) => (answers[2] = answer));
+    await act(async () => {});
+    expect(answers).toEqual([null, NOT_CONNECTED, null]);
+  });
+
+  /** Has s1 say `body`, answering what that settles with. */
+  function editing(result: ReturnType<typeof joinGeneral>["result"], body: string) {
+    let saved: Promise<string | null> | undefined;
+    act(() => {
+      saved = result.current.scheduling.edit("s1", body);
+    });
+    return saved!;
+  }
+
+  it("edits one, settling once the room says it's changed it, or why it didn't, there rather than over the timeline", async () => {
+    const { result } = joinGeneral();
+    const edit = (body: string) => editing(result, body);
+    const saved = edit("<p>Sooner</p>");
+    expect(socket().sentOfType("scheduled.edit")).toEqual([{ type: "scheduled.edit", scheduledId: "s1", body: "<p>Sooner</p>" }]);
+    // What's scheduled, after a change from another tab, or to another message, isn't this one's answer.
+    socket().receive({ type: "scheduled", messages: [scheduledAs("s1")] });
+    socket().receive({ type: "scheduled", messages: [scheduledAs("s1")], edited: "s2" });
+    let answer: string | null | undefined;
+    void saved.then((settledWith) => (answer = settledWith));
+    await act(async () => {});
+    expect(answer).toBeUndefined();
+    socket().receive({ type: "scheduled", messages: [scheduledAs("s1", { body: "<p>Sooner</p>" })], edited: "s1" });
+    expect(await saved).toBeNull();
+
+    const refused = edit("<p>Gone</p>");
+    socket().receive({ type: "error", message: SCHEDULED_GONE, scheduledId: "s1", failed: "scheduled.edit" });
+    expect(await refused).toBe(SCHEDULED_GONE);
+    expect(result.current.state.notice).toBeNull();
+    // A room that lets the page in again may not have had it.
+    const lost = edit("<p>Sooner</p>");
+    socket().receive(welcome());
+    expect(await lost).toBe(NOT_CONNECTED);
+    expect(await edit(overformatted)).toBe(MESSAGE_TOO_LONG);
+    expect(socket().sentOfType("scheduled.edit")).toHaveLength(3);
+    socket().drop();
+    expect(await edit("<p>Sooner</p>")).toBe(NOT_CONNECTED);
+  });
+
+  it("sends another edit of one once the room has answered the last, as its answer names only the message", async () => {
+    const { result } = joinGeneral();
+    const sent = () => socket().sentOfType("scheduled.edit").map((frame) => frame.body);
+    const first = editing(result, "<p>One</p>");
+    const second = editing(result, "<p>Two</p>");
+    const third = editing(result, "<p>Three</p>");
+    expect(socket().sentOfType("scheduled.edit")).toEqual([{ type: "scheduled.edit", scheduledId: "s1", body: "<p>One</p>" }]);
+    socket().receive({ type: "scheduled", messages: [scheduledAs("s1", { body: "<p>One</p>" })], edited: "s1" });
+    expect(await first).toBeNull();
+    await act(async () => {});
+    expect(sent()).toEqual(["<p>One</p>", "<p>Two</p>"]);
+    // As the room refuses one: what's scheduled, as it was, then why not, after which it says nothing more of it.
+    socket().receive({ type: "scheduled", messages: [scheduledAs("s1", { body: "<p>One</p>" })] });
+    await act(async () => {});
+    expect(sent()).toHaveLength(2);
+    socket().receive({ type: "error", message: BLOCKED_WORDS_REFUSED, scheduledId: "s1", failed: "scheduled.edit" });
+    expect(await second).toBe(BLOCKED_WORDS_REFUSED);
+    await act(async () => {});
+    expect(sent()).toEqual(["<p>One</p>", "<p>Two</p>", "<p>Three</p>"]);
+    socket().receive({ type: "scheduled", messages: [scheduledAs("s1", { body: "<p>Three</p>" })], edited: "s1" });
+    expect(await third).toBeNull();
+    // And none waits once they're answered.
+    void editing(result, "<p>Four</p>");
+    expect(sent()).toHaveLength(4);
+  });
+
+  it("moves, sends now and deletes one, saying why a change couldn't go, and shows the room's refusal", () => {
+    const { result } = joinGeneral();
+    const { scheduling } = result.current;
+    expect([scheduling.reschedule("s1", at), scheduling.sendNow("s1"), scheduling.remove("s1")]).toEqual([null, null, null]);
+    expect(socket().sent.filter((frame) => String(frame.type).startsWith("scheduled."))).toEqual([
+      { type: "scheduled.reschedule", scheduledId: "s1", sendAt: "2026-11-18T17:00:00.000Z" },
+      { type: "scheduled.send", scheduledId: "s1" },
+      { type: "scheduled.delete", scheduledId: "s1" },
+    ]);
+    socket().receive({ type: "error", message: SCHEDULED_GONE, scheduledId: "s1", failed: "scheduled.delete" });
+    expect(result.current.state.notice).toBe(SCHEDULED_GONE);
+    socket().drop();
+    expect(result.current.scheduling.sendNow("s1")).toBe(NOT_CONNECTED);
+  });
+});
+
 describe("Take back a reaction", () => {
   it("sends the removal to the room and drops the reaction when the room confirms", () => {
     const boost = { id: "b1", messageId: "m1", booster: ada, content: "🎉", createdAt: "" };
@@ -1236,7 +1520,7 @@ describe("Presence", () => {
   it("tells the room whether the tab is shown as it connects", () => {
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     joinGeneral({ connect: false });
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=4");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=5");
   });
 
   it("tells the room once the tab has been hidden for 5 seconds, and once it has been shown for 5 again", () => {
@@ -1382,13 +1666,22 @@ describe("Threads", () => {
     expect(result.current.room.state.messages.map((m) => m.id)).toEqual(["m1"]);
   });
 
+  it("sends the preview of a link that comes once a reply has gone, naming the reply", () => {
+    const { result } = openThread();
+    socket().receive({ type: "thread.opened", parentId: "m1", parent, messages: [], hasMore: false });
+    const preview: LinkPreview = { title: "Basecamp", url: "https://basecamp.com/", image: null, description: "" };
+    act(() => result.current.thread.postReply("<p>https://basecamp.com</p>", true)!(preview));
+    const { clientMessageId } = socket().sentOfType("message.create")[0]!;
+    expect(socket().sentOfType("message.preview")).toEqual([{ type: "message.preview", clientMessageId, preview }]);
+  });
+
   it("refuses a reply that's too long, saying so in the thread", () => {
     const { result } = openThread();
-    let sent = true;
+    let sent: AddPreview | null = () => {};
     act(() => {
       sent = result.current.thread.postReply(`<p>${"x".repeat(MAX_MESSAGE_LENGTH + 1)}</p>`, false);
     });
-    expect(sent).toBe(false);
+    expect(sent).toBeNull();
     expect(result.current.thread.state.replies.notice).toBe(MESSAGE_TOO_LONG);
     expect(socket().sentOfType("message.create")).toEqual([]);
   });

@@ -1,4 +1,4 @@
-import { editorField, openRoom, signInAs } from "../../fixtures";
+import { cookieHeader, editorField, openRoom, signInAs } from "../../fixtures";
 import { expect, openKeyboard, test } from "./fixtures";
 
 test.beforeEach(async ({ page, session }) => {
@@ -89,17 +89,21 @@ test("the composer and the newest message stay in view when the keyboard opens",
   await screenIsFine();
 });
 
-test("the people @ lists show above the text, fit the phone, each big enough to tap, and a tap mentions one", async ({ page, room, participant, screenIsFine }) => {
+test("the people @ lists show above the text, fit the phone, each big enough to tap, and a tap mentions one", async ({ page, request, room, participant, screenIsFine }) => {
   // A word only this test's people have in their names, as everyone is in the room.
   const tag = crypto.randomUUID().slice(0, 8);
-  await participant(`Bea ${tag}`);
+  const bea = await participant(`Bea ${tag}`);
+  // With a username nearly as long as one can be, which the list shows after her name.
+  const username = `beatrice_${tag}_hq`;
+  const changed = await request.patch("/api/users/me/profile", { data: { username }, headers: { Cookie: cookieHeader(bea.session) } });
+  expect(changed.status(), await changed.text()).toBe(200);
   await participant(`Cy ${tag}`);
   await openRoom(page, room);
   const composer = editorField(page, "Write a message");
   await composer.tap();
   await page.keyboard.type(`Hi @${tag}`);
   const people = page.getByRole("listbox").getByRole("option");
-  await expect(people).toHaveText([`Bea ${tag}`, `Cy ${tag}`]);
+  await expect(people).toHaveText([`Bea ${tag} @${username}`, `Cy ${tag}`]);
   // Above the line being written: two would fit under it, where the keyboard and the home indicator cover them.
   const line = (await composer.locator("p").first().boundingBox())!;
   const list = (await page.getByRole("listbox").boundingBox())!;
@@ -116,4 +120,44 @@ test("the people @ lists show above the text, fit the phone, each big enough to 
   const mention = page.getByRole("article").getByRole("link", { name: `Cy ${tag}` });
   await expect(mention).toBeVisible();
   await screenIsFine();
+});
+
+test("Manage drafts is beside Send where the row has room for it, and in + on narrow phones, the buttons keeping to one line", async ({ page, room, screenIsFine }) => {
+  await openRoom(page, room);
+  const composer = editorField(page, "Write a message");
+  await composer.tap();
+  await page.keyboard.type("A thought");
+  const button = (name: string) => page.locator("form.composer").getByRole("button", { name, exact: true, includeHidden: true });
+  // A phone 360px wide or less has a card narrower than seven fingertip-sized buttons, 320px, so room for six.
+  const inRow = page.viewportSize()!.width > 360;
+  await expect(button("Manage drafts")).toBeVisible({ visible: inRow });
+  for (const name of ["Attach", "Run shortcut", ...(inRow ? ["Manage drafts"] : []), "Send Message"]) {
+    expect((await button(name).boundingBox())!.y, name).toBe((await button("Show formatting").boundingBox())!.y);
+  }
+  await screenIsFine();
+
+  await button(inRow ? "Manage drafts" : "Attach").tap();
+  await expect(page.getByRole("group", { name: "Drafts in this room" }).getByRole("menuitemradio")).toHaveText(["A thought"]);
+  await screenIsFine();
+  await page.getByRole("menuitem", { name: "Save as draft" }).tap();
+  await expect(composer).toHaveText("");
+  await expect(page.getByRole("button", { name: "Send Message" })).toHaveAttribute("data-empty");
+});
+
+test("Manage drafts keeps its place beside Send in a card as narrow as fingers' seven buttons, as their row has no lines", async ({ page, room }) => {
+  await openRoom(page, room);
+  await editorField(page, "Write a message").tap();
+  await page.keyboard.type("A thought");
+  const button = (name: string) => page.locator("form.composer").getByRole("button", { name, exact: true, includeHidden: true });
+  // A card 323px across inside has room for seven fingertip-sized buttons, 320px, though a mouse's row, with lines
+  // between its nine, gives Manage drafts way under 326px.
+  await page.locator("form.composer").evaluate((form) => {
+    const card = getComputedStyle(form.querySelector(".\\@container")!);
+    const sides = [card.paddingLeft, card.paddingRight, card.borderLeftWidth, card.borderRightWidth].reduce((sum, side) => sum + parseFloat(side), 0);
+    form.style.inlineSize = `${323 + sides}px`;
+  });
+  await expect(button("Manage drafts")).toBeVisible();
+  for (const name of ["Attach", "Run shortcut", "Manage drafts", "Send Message"]) {
+    expect((await button(name).boundingBox())!.y, name).toBe((await button("Show formatting").boundingBox())!.y);
+  }
 });

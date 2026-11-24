@@ -9,7 +9,8 @@ const field = (page: Page) => box(page).getByRole("combobox", { name: "Search" }
 const results = (page: Page) => page.getByRole("region", { name: "Search results" });
 const cards = (page: Page) => results(page).getByRole("listitem");
 const filters = (page: Page) => page.getByRole("group", { name: "Search filters" });
-const railSearch = (page: Page) => page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Search", exact: true });
+/** The top bar's search field, which shows the results page's search. */
+const barSearch = (page: Page) => page.getByRole("banner").getByRole("button", { name: /^Search |^Change search: / });
 
 /** How many lines `elements` are laid out on, going by where each one's top is. */
 const linesOf = (elements: Locator) => elements.evaluateAll((all) => new Set(all.map((element) => Math.round(element.getBoundingClientRect().top))).size);
@@ -62,13 +63,13 @@ test.describe("Search messages", () => {
     await expect(ada.message(`First ${word}`)).toBeInViewport();
   });
 
-  test("searches everywhere from the rail, for the words typed, as its address says", async ({ members }) => {
+  test("searches everywhere from the top bar, for the words typed, as its address says", async ({ members }) => {
     const ada = await members.signIn("Ada");
     const [one, two] = [uniqueWord("analytical"), uniqueWord("engine")];
     await ada.send(`The ${one} ${two}`);
     await expect(ada.message(`The ${one} ${two}`)).not.toHaveAttribute("aria-busy");
     await expect(async () => {
-      await railSearch(ada.page).click();
+      await barSearch(ada.page).click();
       await expect(box(ada.page).getByRole("button", { name: /^Remove / })).toHaveCount(0);
       await field(ada.page).fill(`${two},  ${one}!`);
       await field(ada.page).press("Enter");
@@ -162,13 +163,15 @@ test.describe("Recent searches", () => {
     const ada = await members.signIn("Ada");
     const [eel, newt] = [uniqueWord("eel"), uniqueWord("newt")];
     for (const words of [eel, newt]) {
-      await railSearch(ada.page).click();
+      await barSearch(ada.page).click();
       await field(ada.page).fill(words);
       await field(ada.page).press("Enter");
       await expect(ada.page).toHaveURL(searchAddress(words));
     }
 
-    await railSearch(ada.page).click();
+    // Opened from the room, for everything, the box lists them; on the results page it opens with its search.
+    await ada.page.getByRole("link", { name: "Exit search" }).click();
+    await barSearch(ada.page).click();
     await expect(box(ada.page).getByRole("heading", { name: "Recent searches" })).toBeVisible();
     await expect(box(ada.page).getByRole("option")).toHaveText([newt, eel]);
     // Picking one searches for it again, as your newest.
@@ -200,7 +203,7 @@ test.describe("Recent searches", () => {
     await ada.page.reload();
     await expect(ada.page.getByRole("heading", { name: "Find a conversation" })).toBeVisible();
     await expect(recent).toBeHidden();
-    await railSearch(ada.page).click();
+    await barSearch(ada.page).click();
     await expect(box(ada.page).getByRole("option")).toHaveCount(0);
   });
 });

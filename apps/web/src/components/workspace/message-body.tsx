@@ -1,8 +1,11 @@
 import { createElement, useContext, type ComponentProps, type ReactNode } from "react";
-import { isAppPage, type User, type UserId } from "@ember/protocol";
-import type { DisplayElement, DisplayNode, DisplayPreview } from "@ember/richtext/dom";
+import { isAppPage, type RoomId, type User, type UserId } from "@ember/protocol";
+import { displayBody, PRIVATE_ROOM_NAME, type DisplayElement, type DisplayNode, type DisplayPreview } from "@ember/richtext/dom";
+import { Lock } from "@/components/icons/iconoir";
 import { PageLink } from "@/components/page-link";
 import { mentionedPerson, PeopleContext } from "@/hooks/use-directory";
+import { roomPath } from "@/hooks/use-route";
+import { RoomsContext } from "@/hooks/use-rooms";
 import { cn } from "@/lib/utils";
 import { CodeBlock } from "./code-block";
 import { markedRanges, matchesIn, SearchMarks, type Matches } from "./search-marks";
@@ -16,6 +19,19 @@ const TABLE_PARTS = new Set(["table", "thead", "tbody", "tfoot", "tr"]);
 
 /** What a mention of someone no one knows shows. */
 export const UNKNOWN_PERSON = "☒";
+
+/**
+ * What a stored body shows, or null when it can't be shown. `plainText` is the body's, which tells when a
+ * message is only the link its preview is of, and a preview can't link to the page's own host.
+ */
+export function shownBody(body: string, plainText: string): DisplayNode[] | null {
+  try {
+    return displayBody(body, plainText, location.hostname);
+  } catch (error) {
+    console.error("Could not show a message", error);
+    return null;
+  }
+}
 
 interface Props {
   /** The text, as `displayBody` says it shows. */
@@ -47,6 +63,9 @@ export function MessageBody({ nodes, mentions, emoji = false, trailing, classNam
 function nodeOf(node: DisplayNode, mentions: User[], trailing?: ReactNode, inLink = false, matches: Matches | null = null): ReactNode {
   if (node.kind === "text") return markedRanges(node.value, matches?.get(node));
   if (node.kind === "mention") return createElement(Mention, { userId: node.userId, mentions, inLink });
+  // @here, @channel or @everyone, in semibold as a person's name is in a mention of them.
+  if (node.kind === "special-mention") return createElement("span", { className: "font-semibold" }, `@${node.mention}`);
+  if (node.kind === "room-mention") return createElement(RoomMention, { roomId: node.roomId, inLink });
   if (node.kind === "preview") return createElement(LinkPreview, { preview: node, mentions, inLink });
   const shown = TABLE_PARTS.has(node.name) ? node.children.filter((child) => child.kind !== "text" || child.value.trim() !== "") : node.children;
   const children = shown.map((child) => nodeOf(child, mentions, undefined, inLink || node.name === "a", matches));
@@ -80,6 +99,32 @@ function Mention({ userId, mentions, inLink }: { userId: UserId; mentions: User[
       {inLink ? <UserAvatar user={person} className={avatar} /> : <AvatarLink user={person} reach="none" className={avatar} />}
       {person.name}
     </span>
+  );
+}
+
+/**
+ * A mention of a room, as Slack shows one of a channel: its name after a #, in semibold, linking to it, for
+ * someone in it, and for anyone else, a lock and "private room", which tells nothing of the room and goes
+ * nowhere, as the project's owner picked (2026-11-21). In a link, the name is only text, as a link can't
+ * hold another. Until the sidebar loads, which says who's in what, it's only the #.
+ */
+function RoomMention({ roomId, inLink }: { roomId: RoomId; inLink: boolean }) {
+  const rooms = useContext(RoomsContext);
+  if (rooms === null) return "#";
+  const room = rooms.get(roomId);
+  if (!room) {
+    return (
+      <span className="font-semibold whitespace-nowrap text-message-muted">
+        <Lock className="inline-block size-[1em] align-[-0.125em]" /> {PRIVATE_ROOM_NAME}
+      </span>
+    );
+  }
+  const name = `#${room.name}`;
+  if (inLink) return <span className="font-semibold">{name}</span>;
+  return (
+    <PageLink href={roomPath(room.id)} className="font-semibold no-underline hover:underline">
+      {name}
+    </PageLink>
   );
 }
 

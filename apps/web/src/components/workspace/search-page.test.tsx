@@ -81,7 +81,7 @@ const cards = async () => within(await found()).getAllByRole("listitem");
 const filters = () => screen.queryByRole("group", { name: "Search filters" });
 const chip = (name: string | RegExp) => within(filters()!).getByRole("button", { name });
 const recents = () => screen.queryByRole("region", { name: "Recent searches" });
-/** The top bar's search, which opens the search box. */
+/** The page header's search, at 900px and below, which opens the search box. */
 const changeSearch = () => within(screen.getByRole("navigation", { name: "Page" })).getByRole("button", { name: /^Change search: |^Search$/ });
 const here = () => location.pathname + location.search;
 

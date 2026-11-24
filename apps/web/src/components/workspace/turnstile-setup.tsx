@@ -6,6 +6,7 @@ import { FLEXIBLE_MIN_WIDTH } from "@/components/turnstile-check";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useMounted } from "@/hooks/use-mounted";
+import { useSecretField } from "@/hooks/use-secret-field";
 import { ApiError, isSignedOut, saveTurnstileKeys } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { DIALOG, DIALOG_BACKDROP, DIALOG_CLOSE, DIALOG_TITLE, MAIN_ACTION, OTHER_ACTION } from "./unsaved-changes";
@@ -251,6 +252,7 @@ function KeyInput({
   refusal: { field: KeyField; error: string } | null;
 }) {
   const refused = refusal?.field === field ? refusal.error : null;
+  const input = useSecretField(typed);
   return (
     <div>
       <Field id={id} label={label}>
@@ -260,7 +262,7 @@ function KeyInput({
           autoCapitalize="none"
           spellCheck={false}
           placeholder="0x4AAAAAAA…"
-          value={typed}
+          ref={input}
           aria-invalid={refused !== null}
           aria-describedby={refused !== null ? `${id}_refusal` : undefined}
           onChange={(event) => onType(field, event.target.value)}

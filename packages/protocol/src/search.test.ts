@@ -11,7 +11,7 @@ import {
   searchOfQuery,
   searchPath,
   searchQuery,
-  searchTerms,
+  searchWords,
   type Search,
   type SearchParams,
 } from "./index";
@@ -44,12 +44,12 @@ describe("Search messages", () => {
     expect(hasFilters({})).toBe(false);
   });
 
-  it("quotes each word, so that every word has to match and none is FTS5's syntax", () => {
-    expect(searchTerms("NOT eel")).toBe('"NOT" "eel"');
-    expect(searchTerms("  hello  world ")).toBe('"hello" "world"');
-    expect(searchTerms('say "hi"')).toBe('"say" """hi"""');
-    expect(searchTerms("eel\0shark")).toBe('"eel" "shark"');
-    expect(searchTerms("")).toBe("");
+  it("splits a search into its words once it's sanitized, at spaces and whatever else isn't a word's", () => {
+    expect(searchWords("NOT eel")).toEqual(["NOT", "eel"]);
+    expect(searchWords("  hello,  world! ")).toEqual(["hello", "world"]);
+    expect(searchWords('say "hi" to_me')).toEqual(["say", "hi", "to_me"]);
+    expect(searchWords("eel\0shark")).toEqual(["eel", "shark"]);
+    for (const q of ["", "   ", "!!!", "\0"]) expect(searchWords(q), JSON.stringify(q)).toEqual([]);
   });
 });
 

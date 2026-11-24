@@ -29,6 +29,15 @@ test("on community settings the drawer holds the rail alone, as Navigation, and 
   await screenIsFine();
 });
 
+test("on community settings the drawer's rail has Search, since there's no search field atop conversations there", async ({ page }) => {
+  await page.goto("/account/edit#channel-settings");
+  await page.getByRole("button", { name: "Open navigation" }).tap();
+  const drawer = page.getByRole("dialog", { name: "Navigation" });
+  await drawer.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Search" }).tap();
+  await expect(drawer).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Search" }).getByRole("combobox", { name: "Search" })).toBeFocused();
+});
+
 test("tapping outside the drawer closes it", async ({ page }) => {
   await page.getByRole("button", { name: "Open conversations" }).tap();
   await expect(page.getByRole("dialog")).toBeVisible();

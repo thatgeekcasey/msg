@@ -1,7 +1,7 @@
 import type { Directory } from "@ember/protocol";
-import { mentionPromptItem } from "@ember/richtext";
+import { mentionPromptItem, specialMentionPromptItem } from "@ember/richtext";
 import { beforeEach, describe, expect, it } from "vitest";
-import { api, createRoom, freshDeploy, signIn, workspaceSql, type Session } from "./support";
+import { api, createRoom, direct, freshDeploy, signIn, workspaceSql, type Session } from "./support";
 
 beforeEach(freshDeploy);
 
@@ -38,6 +38,29 @@ describe("@-mention people", () => {
     expect(await offered(ada, `${inRoom}&filter=%20&query=hop`)).toEqual(["grace Hopper"]);
     // `LIKE`: a wildcard is a wildcard.
     expect(await offered(ada, `${inRoom}&filter=a_l`)).toEqual(["Ada Lovelace"]);
+  });
+
+  it("offers people whose usernames start with what's typed too, by name", async () => {
+    const ada = await signIn("Ada Lovelace");
+    const grace = await signIn("Grace Hopper");
+    await signIn("Zing Zhao");
+    await workspaceSql("UPDATE users SET username = 'amazing.grace' WHERE id = ?", grace.user.id);
+    await workspaceSql("UPDATE users SET username = 'countess' WHERE id = ?", ada.user.id);
+    expect(await offered(ada, "?filter=amaz")).toEqual(["Grace Hopper"]);
+    expect(await offered(ada, "?filter=COUNT")).toEqual(["Ada Lovelace"]);
+    // Not the middle of one, which names more people than it finds.
+    expect(await offered(ada, "?filter=zing")).toEqual(["Zing Zhao"]);
+    const room = await createRoom("Leads", { closedTo: [ada.user.id, grace.user.id], as: ada });
+    expect(await offered(ada, `?room_id=${room.id}&filter=amazing.`)).toEqual(["Grace Hopper"]);
+  });
+
+  it("shows each one's username in their prompt item", async () => {
+    const ada = await signIn("Ada Lovelace");
+    await workspaceSql("UPDATE users SET username = 'countess' WHERE id = ?", ada.user.id);
+    const { users } = (await (await api("/api/users", { headers: { Cookie: ada.cookie } })).json()) as Directory;
+    const listed = users.find((user) => user.id === ada.user.id)!;
+    expect(listed.username).toBe("countess");
+    expect(await (await prompt(ada, "?filter=countess")).text()).toBe(mentionPromptItem({ ...ada.user, username: "countess", avatarUrl: listed.avatarUrl }));
   });
 
   it("offers anyone active without a room, or with a blank one", async () => {
@@ -77,5 +100,51 @@ describe("@-mention people", () => {
       expect(await response.json()).toEqual({ error: "Room not found or inaccessible" });
     }
     expect((await prompt(null, `?room_id=${room.id}`)).status).toBe(401);
+  });
+});
+
+describe("@here, @channel and @everyone", () => {
+  it("offers a room's own composer @here and @channel after the people, but first when they're named in full, as Slack's prompt does", async () => {
+    const ada = await signIn("Ada Lovelace");
+    const grace = await signIn("Grace Hopper");
+    const comes = await signIn("Here Comes");
+    const room = await createRoom("Leads", { closedTo: [ada.user.id, grace.user.id, comes.user.id], as: ada });
+    const inRoom = `?room_id=${room.id}&special_mentions=1`;
+
+    expect(await offered(ada, inRoom)).toEqual(["Ada Lovelace", "Grace Hopper", "Here Comes", "here", "channel"]);
+    expect(await offered(ada, `${inRoom}&filter=h`)).toEqual(["Grace Hopper", "Here Comes", "here"]);
+    expect(await offered(ada, `${inRoom}&filter=HERE`)).toEqual(["here", "Here Comes"]);
+    expect(await offered(ada, `${inRoom}&filter=chan`)).toEqual(["channel"]);
+    expect(await offered(ada, `${inRoom}&filter=channels`)).toEqual([]);
+    // Named from their start, unlike people.
+    expect(await offered(ada, `${inRoom}&filter=ere`)).toEqual(["Here Comes"]);
+    expect(await (await prompt(ada, `${inRoom}&filter=channel`)).text()).toBe(specialMentionPromptItem("channel"));
+  });
+
+  it("offers @everyone in an open room, where everyone is, to anyone but a guest, as Slack's guests can't use it", async () => {
+    const ada = await signIn("Ada Lovelace");
+    const grace = await signIn("Grace Hopper");
+    await workspaceSql("UPDATE users SET guest = 0 WHERE id = ?", ada.user.id);
+    const open = await createRoom("Everyone", { as: ada });
+    const closed = await createRoom("Leads", { closedTo: [ada.user.id, grace.user.id], as: ada });
+
+    expect(await offered(ada, `?room_id=${open.id}&special_mentions=1`)).toEqual(["Ada Lovelace", "Grace Hopper", "here", "channel", "everyone"]);
+    expect(await offered(ada, `?room_id=${open.id}&special_mentions=1&filter=Ev`)).toEqual(["everyone"]);
+    expect(await offered(ada, `?room_id=${open.id}&special_mentions=1&filter=everyone`)).toEqual(["everyone"]);
+    expect(await (await prompt(ada, `?room_id=${open.id}&special_mentions=1&filter=everyone`)).text()).toBe(specialMentionPromptItem("everyone"));
+    expect(await offered(ada, `?room_id=${closed.id}&special_mentions=1`)).toEqual(["Ada Lovelace", "Grace Hopper", "here", "channel"]);
+    expect(await offered(grace, `?room_id=${open.id}&special_mentions=1`)).toEqual(["Ada Lovelace", "Grace Hopper", "here", "channel"]);
+  });
+
+  it("offers none in a DM, nor without a room, nor unless asked for them, as a thread's composer and the editor don't", async () => {
+    const ada = await signIn("Ada Lovelace");
+    const grace = await signIn("Grace Hopper");
+    const room = await createRoom("Leads", { closedTo: [ada.user.id, grace.user.id], as: ada });
+    const dm = await direct(ada, grace);
+
+    expect(await offered(ada, `?room_id=${room.id}&special_mentions=1&filter=c`)).toEqual(["Ada Lovelace", "Grace Hopper", "channel"]);
+    for (const query of [`?room_id=${dm.id}&special_mentions=1`, "?special_mentions=1", `?room_id=${room.id}`, `?room_id=${room.id}&special_mentions=0`]) {
+      expect(await offered(ada, `${query}&filter=c`), query).toEqual(["Ada Lovelace", "Grace Hopper"]);
+    }
   });
 });

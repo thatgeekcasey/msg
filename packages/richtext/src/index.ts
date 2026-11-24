@@ -8,4 +8,5 @@ import { parseHtml } from "./parse";
 export * from "./shared";
 export { parseHtml };
 
-export const { prepareBody, plainText, mentionedUsers, userIdsIn, writtenBody, editableBody, autoLink, displayBody } = withParser(parseHtml);
+export const { prepareBody, plainText, mentionedUsers, userIdsIn, mentionsIn, roomIdsIn, writtenBody, editableBody, specialMentionsAsText, autoLink, displayBody, hasPreview } =
+  withParser(parseHtml);

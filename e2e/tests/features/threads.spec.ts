@@ -44,6 +44,8 @@ test.describe("Reply in a thread", () => {
     const ada = await members.signIn("Ada");
     await (await ada.actions("Ship it Thursday?")).getByRole("link", { name: "Reply in thread" }).click();
     const alsoSend = threadOf(ada).getByRole("checkbox", { name: `Also send to #${rooms.general.name}` });
+    // Its label is never cut short: where the composer's buttons leave it too little room, as beside a room, it takes a line of its own above them.
+    expect(await alsoSend.evaluate((box) => box.nextElementSibling!.scrollWidth <= box.nextElementSibling!.clientWidth)).toBe(true);
     await alsoSend.check();
     await replyBox(ada).fill("Thursday it is");
     await replyBox(ada).press("Enter");

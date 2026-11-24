@@ -173,6 +173,19 @@ describe("Check that people are people with Cloudflare Turnstile", () => {
     expect(onFailed).not.toHaveBeenCalled();
   });
 
+  it("keeps the secret key out of its field's value attribute, where custom CSS could read it, also once it's back on its field", async () => {
+    serve();
+    const { user } = showSetup();
+    await user.type(secretKeyField(), KEYS.secretKey);
+    expect(secretKeyField()).not.toHaveAttribute("value");
+    await user.type(siteKeyField(), KEYS.siteKey);
+    await user.click(button("Continue"));
+    await user.click(button("Back"));
+    expect(await dialog("Set up Turnstile")).toBeInTheDocument();
+    expect(secretKeyField()).toHaveValue(KEYS.secretKey);
+    expect(secretKeyField()).not.toHaveAttribute("value");
+  });
+
   it("sends a site key Turnstile doesn't know back to its field, as its check says", async () => {
     const fetch = serve();
     const { user } = showSetup();

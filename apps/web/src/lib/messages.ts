@@ -1,5 +1,6 @@
-import type { Message, UserId } from "@ember/protocol";
-import { displayMarkup, type DisplayElement, type DisplayNode, type DisplayPreview } from "@ember/richtext/dom";
+import type { EphemeralMessage, Message, RoomId, UserId } from "@ember/protocol";
+import { displayMarkup, roomMentionContent, type DisplayElement, type DisplayNode, type DisplayPreview, type MentionRoom } from "@ember/richtext/dom";
+import { isPending } from "./room-state";
 
 /**
  * How far apart a person's messages can be, either way, and still group, as Campfire's
@@ -7,13 +8,15 @@ import { displayMarkup, type DisplayElement, type DisplayNode, type DisplayPrevi
  */
 const THREAD_WINDOW_MS = 5 * 60 * 1000;
 
-export interface TimelineItem {
-  message: Message;
+/** A message in the timeline: one of the room's, or, `ephemeral`, one only the reader sees, as the card of a call that waits on them. */
+type Entry = { message: Message; ephemeral?: never } | { message: EphemeralMessage; ephemeral: true };
+
+export type TimelineItem = Entry & {
   /** Whether the message is the first of its day in the reader's time zone, which a separator dates. */
   firstOfDay: boolean;
   /** Same author as the previous message, shortly after it: show it compactly. */
   threaded: boolean;
-}
+};
 
 // Times and dates as Campfire's local_time_controller.js writes them, in the reader's locale and time zone.
 // Days are told apart as message_formatter.js tells them, by a formatter's short dates rather than by `Date`,
@@ -34,63 +37,132 @@ export const dateLabel = (date: Date) => dateFormat.format(date);
 /** What a time or a separator's date shows on hover: "10/12/26, 3:04 PM". */
 export const dateTimeLabel = (date: Date) => dateTimeFormat.format(date);
 
+/** The day `date` falls on, as of `now`: today, yesterday, or its date, "Oct 12", or "Oct 12, 2025" in another year. */
+function dayAsOf(date: Date, now: Date): { near: "today" | "yesterday" } | { on: string } {
+  const day = dayFormat.format(date);
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (day === dayFormat.format(now)) return { near: "today" };
+  if (day === dayFormat.format(yesterday)) return { near: "yesterday" };
+  return { on: (yearFormat.format(date) === yearFormat.format(now) ? monthDayFormat : shortDateFormat).format(date) };
+}
+
 /**
  * When a thread's newest reply came, as the thread's summary says it, as of `now`: "today at 3:04 PM",
  * "yesterday at 3:04 PM", "on Oct 12", or "on Oct 12, 2025" in another year. A narrow summary, as on a
  * phone, says it `short`: today's time, or "yesterday".
  */
 export function lastReplyLabel(date: Date, now = new Date()): { long: string; short: string } {
-  const day = dayFormat.format(date);
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (day === dayFormat.format(now)) return { long: `today at ${timeLabel(date)}`, short: timeLabel(date) };
-  if (day === dayFormat.format(yesterday)) return { long: `yesterday at ${timeLabel(date)}`, short: "yesterday" };
-  const on = `on ${(yearFormat.format(date) === yearFormat.format(now) ? monthDayFormat : shortDateFormat).format(date)}`;
-  return { long: on, short: on };
+  const day = dayAsOf(date, now);
+  if ("on" in day) return { long: `on ${day.on}`, short: `on ${day.on}` };
+  return { long: `${day.near} at ${timeLabel(date)}`, short: day.near === "today" ? timeLabel(date) : "yesterday" };
 }
 
+/**
+ * When a huddle started, as the Huddles page says it, as of `now`: "Today at 3:04 PM", "Yesterday at
+ * 3:04 PM", "Oct 12", or "Oct 12, 2025" in another year.
+ */
+export function huddleStartedLabel(date: Date, now = new Date()): string {
+  const day = dayAsOf(date, now);
+  return "on" in day ? day.on : `${day.near === "today" ? "Today" : "Yesterday"} at ${timeLabel(date)}`;
+}
+
+const minutesFormat = new Intl.NumberFormat(undefined, { style: "unit", unit: "minute", unitDisplay: "short" });
+const hoursFormat = new Intl.NumberFormat(undefined, { style: "unit", unit: "hour", unitDisplay: "short" });
+
+/**
+ * How long ago a page was shown, as the top bar's History says it, as of `now`: "Just now", "5 min" or
+ * "2 hr" today, "Yesterday", "Oct 12", or "Oct 12, 2025" in another year.
+ */
+export function visitedLabel(date: Date, now = new Date()): string {
+  const day = dayAsOf(date, now);
+  if ("on" in day) return day.on;
+  if (day.near === "yesterday") return "Yesterday";
+  const minutes = Math.floor((now.getTime() - date.getTime()) / 60_000);
+  if (minutes < 1) return "Just now";
+  return minutes < 60 ? minutesFormat.format(minutes) : hoursFormat.format(Math.floor(minutes / 60));
+}
+
+/** Whether two ISO times fall on the same day in the reader's time zone, as a timeline's separators tell days apart. */
+export const sameDay = (a: string, b: string) => dayFormat.format(new Date(a)) === dayFormat.format(new Date(b));
+
 /** The day each message was written, as `dayFormat` writes it, kept with the message, since a timeline asks again on every render. */
-const days = new WeakMap<Message, string>();
-function dayOf(message: Message): string {
+const days = new WeakMap<Pick<Message, "createdAt">, string>();
+function dayOf(message: Pick<Message, "createdAt">): string {
   let day = days.get(message);
   if (day === undefined) days.set(message, (day = dayFormat.format(new Date(message.createdAt))));
   return day;
 }
 
 /**
- * The messages as message_formatter.js lays them out. A message is the first of its day when the one above it
- * is from another day. It's threaded, without its author's avatar and name, when the one above it is the
- * same person's from no more than five minutes before or after, even across midnight, when it has a separator
- * and still no header. A message deleted while its thread has replies shows neither its author nor its time,
- * so nothing threads under it, and it threads under nothing.
+ * The messages with those only the reader sees, `ephemeral`, among them: each after the messages that came
+ * before it, and before any on its way to the room, whose time is the reader's clock's rather than the room's.
  */
-export function timeline(messages: Message[]): TimelineItem[] {
-  return messages.map((message, index) => {
-    const previous = messages[index - 1];
-    if (!previous) return { message, firstOfDay: true, threaded: false };
-    const [created, before] = [new Date(message.createdAt), new Date(previous.createdAt)];
+function among(messages: Message[], ephemeral: EphemeralMessage[]): Entry[] {
+  const entries: Entry[] = messages.map((message) => ({ message }));
+  for (const message of ephemeral) {
+    const after = entries.findIndex((entry) => !entry.ephemeral && (isPending(entry.message) || entry.message.createdAt > message.createdAt));
+    entries.splice(after === -1 ? entries.length : after, 0, { message, ephemeral: true });
+  }
+  return entries;
+}
+
+/** Whether `entry` shows its author, as its own heading, so that nothing threads under it, and it threads under nothing. */
+const standsApart = ({ message, ephemeral }: Entry) => ephemeral || message.deleted || message.huddle !== undefined;
+
+/**
+ * The messages as message_formatter.js lays them out, with those only the reader sees, `ephemeral`, among
+ * them by when they came. A message is the first of its day when the one above it is from another day.
+ * It's threaded, without its author's avatar and name, when the one above it is the same person's from no
+ * more than five minutes before or after, even across midnight, when it has a separator and still no
+ * header. A message deleted while its thread has replies shows neither its author nor its time, so nothing
+ * threads under it, and it threads under nothing. The same goes for a huddle's message, which shows the
+ * headphones and what it says of its huddle where its author would be, and for one only the reader sees,
+ * which says so under its author.
+ */
+export function timeline(messages: Message[], ephemeral: EphemeralMessage[] = []): TimelineItem[] {
+  const entries = among(messages, ephemeral);
+  return entries.map((entry, index) => {
+    const previous = entries[index - 1];
+    if (!previous) return { ...entry, firstOfDay: true, threaded: false };
+    const [{ message }, { message: before }] = [entry, previous];
     return {
-      message,
-      firstOfDay: dayOf(previous) !== dayOf(message),
+      ...entry,
+      firstOfDay: dayOf(before) !== dayOf(message),
       threaded:
-        !message.deleted && !previous.deleted && previous.creator.id === message.creator.id && Math.abs(created.getTime() - before.getTime()) <= THREAD_WINDOW_MS,
+        !standsApart(entry) &&
+        !standsApart(previous) &&
+        before.creator.id === message.creator.id &&
+        Math.abs(new Date(message.createdAt).getTime() - new Date(before.createdAt).getTime()) <= THREAD_WINDOW_MS,
     };
   });
 }
 
 /**
+ * The newest of `messages` that the person `userId` signs in wrote, which Up Arrow edits. A huddle's
+ * message is in the name of whoever started the huddle, who didn't write it.
+ */
+export const newestWrittenBy = <T extends Message>(messages: T[], userId: UserId): T | undefined => messages.findLast((message) => message.creator.id === userId && !message.huddle);
+
+/**
  * What Quote writes in the composer (reply_controller.js): what the message shows but its link previews,
  * quoted, with each mention as the bare name `nameOf` gives, then its author with a link to it, and a line
- * to reply on.
+ * to reply on. Each mention of a room stays one, shown as the room `roomOf` finds, the quoting reader's,
+ * or as a private room where it finds none, as the edit box shows it, so the reply names a private room
+ * only to those in it.
  */
-export function replyQuote(nodes: DisplayNode[], author: string, link: string, nameOf: (userId: UserId) => string): string {
+export function replyQuote(nodes: DisplayNode[], author: string, link: string, nameOf: (userId: UserId) => string, roomOf: (roomId: RoomId) => MentionRoom | undefined): string {
   const linkToOriginal: DisplayNode = { kind: "element", name: "a", attrs: { href: link }, children: [{ kind: "text", value: "#" }] };
   const quote: DisplayNode[] = [
     { kind: "element", name: "blockquote", attrs: {}, children: quoted(nodes) },
     { kind: "element", name: "cite", attrs: {}, children: [{ kind: "text", value: `${author} ` }, linkToOriginal] },
     { kind: "element", name: "p", attrs: {}, children: [{ kind: "element", name: "br", attrs: {}, children: [] }] },
   ];
-  return displayMarkup(quote, ({ userId }) => nameOf(userId));
+  return displayMarkup(
+    quote,
+    ({ userId }) => nameOf(userId),
+    ({ roomId }) => roomMentionContent(roomOf(roomId)),
+  );
 }
 
 /**
@@ -113,9 +185,15 @@ function quoted(nodes: DisplayNode[]): DisplayNode[] {
   return link && !hasText(nodes) ? [{ kind: "text", value: link }] : nodes;
 }
 
-/** Whether there's text outside link previews, where a mention is the name it shows. */
+/** Whether there's text outside link previews, where a mention is the name it shows, and a special mention or a room's its own. */
 const hasText = (nodes: DisplayNode[]): boolean =>
-  nodes.some((node) => node.kind === "mention" || (node.kind === "text" ? node.value.trim() !== "" : node.kind === "element" && hasText(node.children)));
+  nodes.some(
+    (node) =>
+      node.kind === "mention" ||
+      node.kind === "special-mention" ||
+      node.kind === "room-mention" ||
+      (node.kind === "text" ? node.value.trim() !== "" : node.kind === "element" && hasText(node.children)),
+  );
 
 /** The first link in a link preview, as `.og-embed a` finds it, by where it goes. */
 function firstPreviewLink(nodes: DisplayNode[]): string | undefined {

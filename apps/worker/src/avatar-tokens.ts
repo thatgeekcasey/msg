@@ -53,20 +53,32 @@ let listed = { secret: "", tokens: new Map<UserId, string>() };
 
 /**
  * The people directory's entries, each with its avatar's address: `user_avatar_path(user.avatar_token, v: ...)`,
- * and `agent` only for an AI agent's.
+ * their username only if they have one, `agent` only for an AI agent's, `adminsOnly` only for one
+ * kept for administrators, and `pausedUntil` only while they're active and the pause of their notifications
+ * hasn't ended.
  */
 export async function directoryOf<Entry extends DirectoryEntry>(
   entries: Entry[],
   secret: string,
-): Promise<Array<Omit<Entry, "updatedAt" | "agent"> & { avatarUrl: string; agent?: true }>> {
+): Promise<
+  Array<Omit<Entry, "updatedAt" | "agent" | "keptFor" | "username" | "pausedUntil"> & { username?: string; avatarUrl: string; agent?: true; adminsOnly?: true; pausedUntil?: string }>
+> {
   if (listed.secret !== secret) listed = { secret, tokens: new Map() };
   const { tokens } = listed;
   const tokenOf = await avatarTokens(secret);
+  const now = Date.now();
   return Promise.all(
-    entries.map(async ({ updatedAt, agent, ...user }) => {
+    entries.map(async ({ updatedAt, agent, keptFor, username, pausedUntil, ...user }) => {
       let token = tokens.get(user.id);
       if (token === undefined) tokens.set(user.id, (token = await tokenOf(user.id)));
-      return { ...user, avatarUrl: avatarPath(user.id, token, updatedAt), ...(agent && { agent }) };
+      return {
+        ...user,
+        ...(username !== null && { username }),
+        avatarUrl: avatarPath(user.id, token, updatedAt),
+        ...(agent && { agent }),
+        ...(keptFor !== null && { adminsOnly: true as const }),
+        ...(user.status === "active" && pausedUntil !== null && Date.parse(pausedUntil) > now && { pausedUntil }),
+      };
     }),
   );
 }

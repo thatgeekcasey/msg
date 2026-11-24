@@ -1,4 +1,4 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { cookieHeader } from "../../fixtures";
 import { expect, test, type Member } from "./fixtures";
 
@@ -14,21 +14,37 @@ const prompt = (member: Member) => member.page.getByRole("listbox");
 /** The people the @ prompt lists, in order. */
 const offered = (member: Member) => prompt(member).getByRole("option");
 
+/**
+ * Waits for the @ prompt's list to close and for Lexxy to listen for the next @, which it starts again a
+ * frame after closing the list: sooner than anyone types one, but not always sooner than a test does,
+ * whose @ it would miss.
+ */
+async function listClosed(member: Member): Promise<void> {
+  await expect(prompt(member)).toBeHidden();
+  await member.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
 /** The mention of `name` in `scope`: their avatar, then their name. */
 const mention = (scope: Locator, name: string) => scope.getByText(name, { exact: true });
 
 /**
+ * Resolves as `page` gets the list of people for all of `filter`. Lexxy searches whenever typing pauses and
+ * draws each answer as it comes, picking its first, and an answer for less of `filter` can list the same
+ * people first, as on a busy machine. When someone is picked from that list, the answer for all of it comes
+ * after: Lexxy then closes its list once more, and misses an @ typed in the frame that follows.
+ */
+const answerFor = (page: Page, filter: string) => page.waitForResponse((response) => new URL(response.url()).searchParams.get("filter") === filter);
+
+/**
  * Types @ and then `filter` into `field`, waiting for the list between them, as someone does who reads it
- * first. The list follows what's typed while it loads too ("lists the people for what's typed while…").
- * Lexxy searches whenever typing pauses and draws each answer as it comes, picking its first. An answer
- * for less of `filter` can list the same people first, as on a busy machine, so this waits for the
- * answer for all of it.
+ * first, and then for the answer for all of `filter`. The list follows what's typed while it loads too
+ * ("lists the people for what's typed while…").
  */
 async function typeMention(field: Locator, filter: string): Promise<void> {
   const page = field.page();
   await field.pressSequentially("@");
   await expect(page.getByRole("listbox")).toBeVisible();
-  const answered = page.waitForResponse((response) => new URL(response.url()).searchParams.get("filter") === filter);
+  const answered = answerFor(page, filter);
   await field.pressSequentially(filter);
   await answered;
 }
@@ -82,7 +98,7 @@ test.describe("@-mention people", () => {
       await typeMention(zed.composer(), tag);
       await expect(offered(zed)).toHaveText([`Bea ${tag}`, `Zed ${tag}`]);
       await zed.composer().press(key);
-      await expect(prompt(zed)).toBeHidden();
+      await listClosed(zed);
     }
     await expect(mention(zed.composer(), `Bea ${tag}`)).toHaveCount(3);
     await expect(zed.composer()).toContainText(",");
@@ -99,12 +115,30 @@ test.describe("@-mention people", () => {
 
     // The first time, Lexxy fetches the list before it reads what follows the @, and after that, as the @ is typed.
     for (const time of ["first", "second"]) {
+      const answered = answerFor(zed.page, tag);
       await zed.composer().pressSequentially(`@${tag}`);
+      await answered;
       await expect(offered(zed), `the ${time} time`).toHaveText([`Bea ${tag}`, `Zed ${tag}`]);
       await zed.composer().press("Tab");
-      await expect(prompt(zed)).toBeHidden();
+      await listClosed(zed);
     }
     await expect(mention(zed.composer(), `Bea ${tag}`)).toHaveCount(2);
+  });
+
+  test("lists someone whose username starts with what follows @ too, showing it after their name", async ({ members, participant, request }) => {
+    const tag = newTag();
+    const grace = await participant(`Grace ${tag}`);
+    const username = `amazing.${tag}`;
+    const changed = await request.patch("/api/users/me/profile", { data: { username }, headers: { Cookie: cookieHeader(grace.session) } });
+    expect(changed.status(), await changed.text()).toBe(200);
+    const ada = await members.signIn(`Ada ${tag}`);
+
+    await ada.composer().pressSequentially("Hey ");
+    await typeMention(ada.composer(), username.slice(0, -2));
+    await expect(offered(ada)).toHaveText([`Grace ${tag} @${username}`]);
+    await ada.composer().press("Tab");
+    // The mention names them, as every mention does.
+    await expect(mention(ada.composer(), `Grace ${tag}`)).toBeVisible();
   });
 
   test("says No matches when no one's name has what follows @, and Escape closes the list, keeping what's written", async ({ members }) => {
@@ -170,6 +204,110 @@ test.describe("Highlight mentions of you", () => {
     await expect(highlight(ada, "Typed out")).toHaveCount(0);
     await expect(grace.message("Thanks")).toBeVisible();
     await expect(highlight(grace, "Thanks")).toHaveCount(0);
+  });
+});
+
+// Slack's mention badges, counting what in an unread room asks for you.
+test.describe("Count mentions of you", () => {
+  test("counts the messages mentioning you in a room you're not in on its row, in place of its dot, through a reload, until you open it", async ({ members, rooms }) => {
+    const tag = newTag();
+    const ada = await members.signIn(`Ada ${tag}`, { path: `/rooms/${rooms.random.id}` });
+    const grace = await members.signIn(`Grace ${tag}`);
+    const row = (name: string) => ada.page.getByRole("region", { name: "Rooms" }).getByRole("link", { name });
+    const general = row("general");
+
+    await grace.send("Lunch?");
+    await expect(general).toHaveAccessibleDescription(/^Unread/);
+    await expect(general).not.toHaveAccessibleDescription(/mention/);
+
+    await sendMention(grace, "Thanks ", tag, [`Ada ${tag}`, `Grace ${tag}`]);
+    await expect(general).toHaveAccessibleDescription(/^Unread 1 mention /);
+    await sendMention(grace, "And ", tag, [`Ada ${tag}`, `Grace ${tag}`]);
+    await expect(general).toHaveAccessibleDescription(/^Unread 2 mentions /);
+    await expect(general.getByText("2", { exact: true })).toHaveCSS("height", "18px");
+
+    // The server keeps the count.
+    await ada.page.reload();
+    await expect(general).toHaveAccessibleDescription(/^Unread 2 mentions /);
+
+    // Opening it reads it, once the room has let Ada's socket in.
+    await general.click();
+    await expect(ada.page.getByRole("heading", { level: 1 })).toHaveText("general");
+    await ada.connected();
+    await expect(general).not.toHaveAccessibleDescription(/^Unread/);
+    await expect(general.getByText("2", { exact: true })).toBeHidden();
+
+    // Reading it starts the count again, for what comes once Ada has left and her sidebar has heard of the read.
+    await expect(grace.presence()).toHaveText("2 here now");
+    await row("random").click();
+    await expect(grace.presence()).toHaveText("1 here now");
+    await expect(general).not.toHaveAccessibleDescription(/^Unread/);
+    await grace.send("Bye");
+    await expect(general).toHaveAccessibleDescription(/^Unread/);
+    await expect(general).not.toHaveAccessibleDescription(/mention/);
+  });
+});
+
+// Slack's @here and @channel, which notify the room rather than someone.
+test.describe("Notify a room", () => {
+  test("offers @here and @channel after the people, and @here first once it's typed in full, which Space picks, highlighting the message for everyone", async ({ members, participant }) => {
+    const tag = newTag();
+    // With whoever made the room, and other tests' people, it holds more than six, so sending asks first.
+    for (const name of ["Hopper", "Joan", "Kay", "Lin"]) await participant(`${name} ${tag}`);
+    const ada = await members.signIn(`Ada ${tag}`);
+    const grace = await members.signIn(`Grace ${tag}`);
+
+    await grace.composer().pressSequentially("Lunch? ");
+    await typeMention(grace.composer(), "h");
+    await expect(offered(grace).last()).toHaveText("@here Notify everyone active in this room");
+    await expect(offered(grace).last().locator(".autocompletable__at")).toBeVisible();
+    const answered = answerFor(grace.page, "here");
+    await grace.composer().pressSequentially("ere");
+    await answered;
+    await expect(offered(grace).first()).toHaveText("@here Notify everyone active in this room");
+    await expect(offered(grace).first()).toHaveAttribute("aria-selected");
+    await grace.composer().press("Space");
+    await listClosed(grace);
+    await expect(grace.composer().getByText("@here", { exact: true })).toBeVisible();
+    await grace.composer().press("Enter");
+    // Ada's tab is in use, so @here notifies someone.
+    await expect(grace.page.getByRole("dialog").getByRole("button", { name: "Send" })).toBeFocused();
+    await grace.page.keyboard.press("Enter");
+
+    for (const member of [ada, grace]) {
+      await expect(member.message("Lunch?")).toContainText("Lunch? @here");
+      await expect(member.message("Lunch?").locator(".border-mention")).toHaveCSS("border-left-width", "2px");
+    }
+  });
+
+  test("asks before @channel notifies a room of six or more, as Slack asks, going back to the message on Escape and sending it on Enter", async ({ members, participant }) => {
+    const tag = newTag();
+    // With whoever made the room, and other tests' people, it holds more than six.
+    for (const name of ["Hopper", "Joan", "Kay", "Lin"]) await participant(`${name} ${tag}`);
+    const ada = await members.signIn(`Ada ${tag}`);
+    const grace = await members.signIn(`Grace ${tag}`);
+
+    await grace.composer().pressSequentially("Standup ");
+    await typeMention(grace.composer(), "channel");
+    await expect(offered(grace).first()).toHaveText("@channel Notify everyone in this room");
+    await grace.composer().press("Tab");
+    await listClosed(grace);
+    await grace.composer().press("Enter");
+    const dialog = grace.page.getByRole("dialog");
+    await expect(dialog.getByRole("heading")).toHaveText(/^Notify [\d,]+ people\?$/);
+    await expect(dialog).toContainText("@channel notifies everyone in #general.");
+    await expect(dialog.getByRole("button", { name: "Send" })).toBeFocused();
+    await grace.page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(grace.composer()).toBeFocused();
+    await expect(grace.composer()).toContainText("Standup @channel");
+
+    await grace.composer().press("Enter");
+    await expect(dialog.getByRole("button", { name: "Send" })).toBeFocused();
+    await grace.page.keyboard.press("Enter");
+    await expect(dialog).toBeHidden();
+    for (const member of [ada, grace]) await expect(member.message("Standup")).toContainText("Standup @channel");
+    await expect(grace.composer()).toHaveText("");
   });
 });
 

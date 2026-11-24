@@ -79,13 +79,14 @@ interface Props {
 }
 
 /**
- * The search results page, at `/searches?q=`, after Slack's: the search in the top bar, which opens the
- * search box to change it, its filters under it, which turn on and off as the box's chips do, and how
- * the results are sorted, then how many messages it found, and each, newest first or oldest, as a card
- * naming its room and day, with the words it matched marked, and Show more under them while there are
- * more. A page without a search lists your recent searches. Each visit asks for its address's search
- * afresh, but the one the search box goes to, which shows what its search answered. Until a visit's
- * search answers, the page goes on showing the last one, marked busy, and drops it if the search fails.
+ * The search results page, at `/searches?q=`, after Slack's: the search in the top bar, or where there's
+ * none in the page's header, which opens the search box to change it, its filters under it, which turn
+ * on and off as the box's chips do, and how the results are sorted, then how many messages it found, and
+ * each, newest first or oldest, as a card naming its room and day, with the words it matched marked, and
+ * Show more under them while there are more. A page without a search lists your recent searches. Each
+ * visit asks for its address's search afresh, but the one the search box goes to, which shows what its
+ * search answered. Until a visit's search answers, the page goes on showing the last one, marked busy,
+ * and drops it if the search fails.
  */
 export function SearchPage({ me, rooms, back, onFailed }: Props) {
   const query = useQuery();
@@ -172,7 +173,7 @@ export function SearchPage({ me, rooms, back, onFailed }: Props) {
   };
 
   const searchable = isSearchable(search);
-  // What the top bar shows of the search, if there's anything to show.
+  // What the header shows of the search, if there's anything to show.
   const shown = search.q !== "" || hasFilters(search);
   const fromMe = search.from === me.id;
   const roomIn = search.in === undefined ? null : names.room(search.in);
@@ -183,13 +184,14 @@ export function SearchPage({ me, rooms, back, onFailed }: Props) {
           <ArrowLeft className="size-5" />
           <span className="sr-only">Exit search</span>
         </PageLink>
-        <h1 className="sr-only">Search messages</h1>
-        {/* The search, which opens the search box to change it. */}
+        {/* Named where the top bar shows the search. */}
+        <h1 className="min-w-0 flex-1 text-[17px] leading-[1.4] font-[650] no-top-bar:sr-only">Search messages</h1>
+        {/* The search, which opens the search box to change it, where there's no top bar to show it. */}
         <button
           type="button"
           aria-label={shown ? `Change search: ${searchLabel(search, names)}` : undefined}
           onClick={(event) => openSearch({ opener: event.currentTarget, search, sort })}
-          className="flex min-h-9 max-w-[640px] min-w-0 flex-1 cursor-text items-center gap-2 rounded-[9px] border bg-surface px-3 text-start text-[15px] hover:border-muted-foreground touch:min-h-11"
+          className="hidden min-h-9 max-w-[640px] min-w-0 flex-1 cursor-text items-center gap-2 rounded-[9px] border bg-surface px-3 text-start text-[15px] hover:border-muted-foreground touch:min-h-11 no-top-bar:flex"
         >
           <SearchIcon className="size-[18px] shrink-0 text-muted-foreground" />
           {shown ? (

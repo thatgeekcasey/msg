@@ -21,8 +21,9 @@ EMBER_SETUP_PASSWORD=
 # Whom push services may contact about your pushes, a mailto: or https: address; this project's otherwise.
 # VAPID_SUBJECT=
 # A Memberful custom app's keys, with which an administrator can let a Memberful site's members sign
-# in: the site's address, such as https://example.memberful.com, and the app's OAuth identifier and
-# client secret. The app's OAuth redirect URL is Ember's address followed by /auth/memberful/callback.
+# in, in place of any given in Set up Memberful, which asks for them all in Membership: the site's
+# address, such as https://example.memberful.com, and the app's OAuth identifier and client secret.
+# The app's OAuth redirect URL is Ember's address followed by /auth/memberful/callback.
 # MEMBERFUL_URL=
 # MEMBERFUL_CLIENT_ID=
 # MEMBERFUL_CLIENT_SECRET=
@@ -30,10 +31,21 @@ EMBER_SETUP_PASSWORD=
 # member whose membership lapses is signed out: the app's API key, and the webhook's secret key.
 # MEMBERFUL_API_KEY=
 # MEMBERFUL_WEBHOOK_SECRET=
+# A single sign-on provider that speaks OpenID Connect, such as Zitadel, Keycloak or Okta, which takes the
+# place of any an administrator sets up on Workspace settings' Single sign-on card: its issuer, such as
+# https://example.zitadel.cloud, and the Client ID and Client Secret of a web app registered there, whose
+# redirect URI is Ember's address followed by /auth/sso/callback (docs/self-hosting.md#single-sign-on).
+# SSO_ISSUER=
+# SSO_CLIENT_ID=
+# SSO_CLIENT_SECRET=
 # A Turnstile widget's keys, with which open sign-up checks that whoever signs up is a person. Cloudflare's
 # test keys, 1x00000000000000000000AA and 1x0000000000000000000000000000000AA, always pass, on localhost too.
 # TURNSTILE_SITE_KEY=
 # TURNSTILE_SECRET_KEY=
+# Where Ember reads models.json, the models it offers besides Workers AI's (docs/models.md): unset, the
+# one on Ember's main branch, or another https address, such as a branch's, to try a change, or blank
+# to offer only this checkout's.
+# EMBER_MODELS_URL=https://raw.githubusercontent.com/NYLLON-SOFTWARE/ember-cloudflare/<branch>/models.json
 # Lets plain HTTP through where it would be redirected to HTTPS, which localhost never is: set it to
 # reach `wrangler dev --ip 0.0.0.0` from a phone on your network.
 # DISABLE_SSL=true

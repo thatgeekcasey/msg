@@ -1,7 +1,7 @@
 // `ActionText::Content`: loading a body (canonicalized as Action Text loads a stored one) and its plain
 // text.
 
-import { ATTACHMENT_TAG, attachmentFromNode, attachmentPlainText, type ResolveMention } from "./attachments";
+import { ATTACHMENT_TAG, attachmentFromNode, attachmentPlainText, noRooms, type ResolveMention } from "./attachments";
 import { BODY, parseReplacement, type HtmlParser } from "./markup";
 import { nodeToPlainText } from "./plain-text";
 import { isBlank, strip } from "./ruby";
@@ -68,12 +68,12 @@ function galleryAttachmentsAfterAnother(nodes: Node[]): Set<Node> {
   return followers;
 }
 
-/** `ActionText::Content#to_plain_text`, on a loaded body (which it changes). */
-export function contentToPlainText(parse: HtmlParser, content: Fragment, resolve: ResolveMention): string {
+/** `ActionText::Content#to_plain_text`, on a loaded body (which it changes), naming the rooms `rooms` finds. */
+export function contentToPlainText(parse: HtmlParser, content: Fragment, resolve: ResolveMention, rooms = noRooms): string {
   const representations = new Map<Node, Node[]>();
   for (const node of attachmentNodes(content)) {
     sanitizeContentAttribute(parse, node);
-    const representation = attachmentPlainText(attachmentFromNode(parse, node, resolve));
+    const representation = attachmentPlainText(attachmentFromNode(parse, node, resolve, "", rooms));
     representations.set(
       node,
       typeof representation === "string"

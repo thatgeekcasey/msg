@@ -168,8 +168,28 @@ describe("Forgery protection without tokens", () => {
     expect((await api("/api/me", withCookie(cookie))).status).toBe(200);
   });
 
-  it("leaves reads alone", async () => {
+  /** A read of `path` sent with exactly `headers`. */
+  const readWith = (path: string, headers: Record<string, string>) => exports.default.fetch(`${origin}${path}`, { headers });
+
+  it("accepts reads from the app's own pages, an address typed in, and what isn't a browser", async () => {
     const { cookie } = await signIn("Ada");
-    expect((await api("/api/me", { headers: { Cookie: cookie, "Sec-Fetch-Site": "cross-site" } })).status).toBe(200);
+    expect((await readWith("/api/me", { Cookie: cookie, "Sec-Fetch-Site": "same-origin", Origin: origin })).status).toBe(200);
+    expect((await readWith("/api/me", { Cookie: cookie, "Sec-Fetch-Site": "same-origin" })).status).toBe(200);
+    expect((await readWith("/api/me", { Cookie: cookie, "Sec-Fetch-Site": "none" })).status).toBe(200);
+    expect((await readWith("/api/me", { Cookie: cookie })).status).toBe(200);
+  });
+
+  it.each(["cross-site", "same-site", "nonsense"])("refuses reads with Sec-Fetch-Site: %s", async (site) => {
+    const { cookie } = await signIn("Ada");
+    for (const path of ["/api/me", "/api/searches?q=quokka", "/api/nowhere"]) {
+      const response = await readWith(path, { Cookie: cookie, "Sec-Fetch-Site": site });
+      expect(response.status, path).toBe(422);
+      expect(await response.json()).toEqual({ error: "Requests from other sites are refused" });
+    }
+  });
+
+  it.each(["null", "https://evil.test", insecureOrigin])("refuses reads from Origin %s", async (from) => {
+    const { cookie } = await signIn("Ada");
+    expect((await readWith("/api/searches?q=quokka", { Cookie: cookie, "Sec-Fetch-Site": "same-origin", Origin: from })).status).toBe(422);
   });
 });

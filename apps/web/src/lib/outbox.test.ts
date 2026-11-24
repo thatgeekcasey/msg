@@ -1,6 +1,6 @@
 import { CloseCode, MAX_CHECKED_MESSAGES, type Message, type ServerFrame, type User } from "@ember/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handOver, leftUnsent, takeBack } from "./outbox";
+import { handOver, leftUnsent, sendAway, takeBack, type SentAway } from "./outbox";
 import { OFFLINE_AFTER_MS } from "./reconnecting-socket";
 import { initialRoomState, type PendingMessage } from "./room-state";
 
@@ -129,7 +129,7 @@ describe("Send what was left unsent", () => {
     handOver("general", [message, reply]);
     await effectsRun();
     // A hidden tab's, so that the room reads nothing for it.
-    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=4");
+    expect(socket().url).toBe("ws://localhost:3000/api/rooms/general/socket?visible=0&protocol=5");
 
     socket().open();
     expect(socket().sent).toEqual([]);
@@ -227,6 +227,58 @@ describe("Send what was left unsent", () => {
   });
 });
 
+describe("Send to another room", () => {
+  /** Whether what `sending` answers has been answered yet, and how. */
+  const answerOf = async (sending: Promise<SentAway>) => Promise.race([sending, Promise.resolve("not yet")]);
+
+  it("answers that a message written to the room from another went once the room has it", async () => {
+    const sending = sendAway("general", waiting("From elsewhere"));
+    await effectsRun();
+    socket().open();
+    socket().receive(welcome());
+    expect(socket().sentOfType("message.create")).toEqual([{ type: "message.create", clientMessageId: "From elsewhere", body: "From elsewhere" }]);
+    expect(await answerOf(sending)).toBe("not yet");
+    socket().receive({ type: "message.created", message: stored(waiting("From elsewhere")), seq: 1 });
+    expect(await sending).toBe("sent");
+    expect(socket().closedWith).toBe(1000);
+  });
+
+  it("answers that it wasn't sent once the room refuses it, or the outbox gives up before it went, letting it go, as what wrote it says so", async () => {
+    const refused = sendAway("general", waiting("Refused"));
+    await effectsRun();
+    socket().open();
+    socket().receive(welcome());
+    socket().receive({ type: "error", message: "Something went wrong", clientMessageId: "Refused", failed: "message.create" });
+    expect(await refused).toBe("not sent");
+    expect(takeBack("general", ada)).toEqual([]);
+
+    const offline = sendAway("random", waiting("Offline", { roomId: "random" }));
+    await effectsRun();
+    socket().drop();
+    wait(OFFLINE_AFTER_MS);
+    expect(await offline).toBe("not sent");
+    expect(takeBack("random", ada)).toEqual([]);
+  });
+
+  it("answers that it's unconfirmed once it went, but the room was away too long after to say it has it, keeping it for the room's next view to ask about, as sending it again could send it twice", async () => {
+    const sending = sendAway("general", waiting("In doubt"));
+    await effectsRun();
+    socket().open();
+    socket().receive(welcome());
+    expect(socket().sentOfType("message.create")).toHaveLength(1);
+    socket().drop();
+    wait(OFFLINE_AFTER_MS);
+    expect(await sending).toBe("unconfirmed");
+    expect(takeBack("general", ada)).toEqual([sent("In doubt")]);
+  });
+
+  it("answers that it's unconfirmed once a view of the room opening takes it back, to send, or ask about, and show as sent or not itself", async () => {
+    const sending = sendAway("general", waiting("From elsewhere"));
+    expect(takeBack("general", ada)).toEqual([waiting("From elsewhere")]);
+    expect(await sending).toBe("unconfirmed");
+  });
+});
+
 describe("Stop sending what was left unsent", () => {
   it(`shows what's waiting as not sent once it's been without the room ${OFFLINE_AFTER_MS / 1000} seconds, as a view does, and tries no more`, async () => {
     handOver("general", [waiting("Written while away"), sent("in doubt")]);
@@ -283,6 +335,15 @@ describe("Take back what was left unsent", () => {
     socket().receive(welcome());
     socket().receive({ type: "error", message: "Something went wrong", clientMessageId: "Refused", failed: "message.create" });
     expect(takeBack("general", ada)).toEqual([sent("Sent"), { ...sent("Refused"), failed: true }]);
+  });
+
+  it("hands one refused for what it says back with why, for the composer of the view taking it back to give back", async () => {
+    handOver("general", [waiting("Fudge")]);
+    await effectsRun();
+    socket().open();
+    socket().receive(welcome());
+    socket().receive({ type: "error", message: "This community doesn't allow one of these words.", clientMessageId: "Fudge", failed: "message.create", rewrite: true });
+    expect(takeBack("general", ada)).toEqual([{ ...sent("Fudge"), failed: true, rewrite: "This community doesn't allow one of these words." }]);
   });
 
   it("connects once every view going has handed over, and not at all when the view opening takes it all back", async () => {

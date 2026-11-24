@@ -221,6 +221,20 @@ describe("Sign-in attempt limit", () => {
     expect((await signInWith({ emailAddress: ada.emailAddress, password: ada.password }, { ip: "198.51.100.4" })).status).toBe(201);
   });
 
+  it("counts the addresses of one IPv6 /64 as one, since whoever has one of them has them all", async () => {
+    await setUp();
+    const wrong = { emailAddress: ada.emailAddress, password: "difference engine" };
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      expect((await signInWith(wrong, { ip: `2001:db8:1:2::${attempt.toString(16)}` })).status, `attempt ${attempt}`).toBe(401);
+    }
+    const limited = await signInWith({ emailAddress: ada.emailAddress, password: ada.password }, { ip: "2001:db8:1:2:ffff:ffff:ffff:ffff" });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: SIGN_IN_LIMITED });
+
+    // The /64 beside it has attempts of its own.
+    expect((await signInWith({ emailAddress: ada.emailAddress, password: ada.password }, { ip: "2001:db8:1:3::1" })).status).toBe(201);
+  });
+
   it("starts counting again 3 minutes after an IP's first attempt", async () => {
     await setUp();
     const start = Date.now();
@@ -331,9 +345,9 @@ describe("Sign in with email and password", () => {
 
 describe("Version", () => {
   it("is APP_VERSION, else GIT_REVISION, else the release, counting blank values as unset", async () => {
-    expect((await bootstrap()).version).toBe("0.5 beta 1");
+    expect((await bootstrap()).version).toBe("0.5");
     expect((await bootstrap({ APP_VERSION: "1.2.3", GIT_REVISION: "abc123" })).version).toBe("1.2.3");
     expect((await bootstrap({ APP_VERSION: "", GIT_REVISION: "abc123" })).version).toBe("abc123");
-    expect((await bootstrap({ APP_VERSION: " ", GIT_REVISION: " " })).version).toBe("0.5 beta 1");
+    expect((await bootstrap({ APP_VERSION: " ", GIT_REVISION: " " })).version).toBe("0.5");
   });
 });

@@ -1,8 +1,17 @@
-import { CloseCode, type NewRoomForm, type RoomId, type RoomSettings, type SharedRoom, type UserId } from "@ember/protocol";
+import { CloseCode, type NewRoomForm, type RoomId, type RoomSettings, type SharedRoom, type Sidebar, type UserId } from "@ember/protocol";
 import { runInDurableObject } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "../src/workspace";
-import { ACTIVE_PEOPLE, ACTIVE_PEOPLE_IN_ROOM, QUEUE_MEMBER_REVOCATIONS, REVOKE_ROOM_FROM_OTHERS, ROOM_TO_CHANGE, type WorkspaceStore } from "../src/workspace-store";
+import {
+  ACTIVE_PEOPLE,
+  ACTIVE_PEOPLE_IN_ROOM,
+  QUEUE_MEMBER_REVOCATIONS,
+  QUEUE_REVOCATIONS_OF_MEMBERS,
+  REVOKE_ROOM_FROM_OTHERS,
+  REVOKE_ROOM_FROM_USERS,
+  ROOM_TO_CHANGE,
+  type WorkspaceStore,
+} from "../src/workspace-store";
 import { api, closeOf, connect, createRoom, direct, freshDeploy, openWorkspaceSocket, post, settle, signIn, upgrade, workspaceSql, workspaceStub, type Session } from "./support";
 
 beforeEach(freshDeploy);
@@ -15,6 +24,10 @@ const settings = (roomId: RoomId, session: Session) => api(`/api/rooms/${roomId}
 
 const change = (roomId: RoomId, session: Session, body: unknown) =>
   api(`/api/rooms/${roomId}`, { method: "PATCH", headers: { Cookie: session.cookie }, body: JSON.stringify(body) });
+
+/** Puts people in a private room, or takes them out, as /invite and /remove do. */
+const changeMembers = (roomId: RoomId, session: Session, body: unknown) =>
+  api(`/api/rooms/${roomId}/members`, { method: "PATCH", headers: { Cookie: session.cookie }, body: JSON.stringify(body) });
 
 /** Makes someone an administrator, as only first run can yet. */
 const promote = (session: Session) => workspaceSql("UPDATE users SET role = 1 WHERE id = ?", session.user.id);
@@ -48,7 +61,7 @@ describe("Create an open room", () => {
 
     const response = await newRoomForm(grace);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ people: [ada.user, grace.user] } satisfies NewRoomForm);
+    expect(await response.json()).toEqual({ people: [ada.user, grace.user], sections: [] } satisfies NewRoomForm);
   });
 
   it("asks who's signed in", async () => {
@@ -66,11 +79,15 @@ describe("Room settings page", () => {
     expect(await response.json()).toEqual({
       room,
       canAdminister: true,
+      canChangeHuddles: false,
+      canChangeChannelMentions: false,
       people: [
         { ...ada.user, member: true },
         { ...grace.user, member: false },
         { ...linus.user, member: true },
       ],
+      section: null,
+      sections: [],
     } satisfies RoomSettings);
   });
 
@@ -200,6 +217,204 @@ describe("Who can change a room", () => {
     });
     expect(crossSite.status).toBe(422);
     expect(await nameOf(room.id)).toBe("Design");
+  });
+});
+
+describe("Allow huddles in a room", () => {
+  /** A room as `session`'s sidebar lists it. */
+  const listed = async (roomId: RoomId, session: Session) => ((await (await api("/api/sidebar", as(session))).json()) as Sidebar).rooms.find((room) => room.id === roomId);
+
+  /** What the Workspace keeps of whether a room's settings allow huddles in it. */
+  const kept = (roomId: RoomId) => workspaceSql("SELECT huddles_allowed FROM rooms WHERE id = ?", roomId);
+
+  /** Someone signed in who's an administrator, as whoever turns a room's huddles on or off is. */
+  const administrator = async (name: string) => {
+    const session = await signIn(name);
+    await promote(session);
+    return session;
+  };
+
+  it("allows huddles in a room until its settings turn them off, which its settings and its people's sidebars then say", async () => {
+    const [ada, grace] = [await administrator("Ada"), await signIn("Grace")];
+    const [room, other] = [await createRoom("Announcements", { as: ada }), await createRoom("Design", { as: ada })];
+    expect(room).not.toHaveProperty("huddles");
+
+    const response = await change(room.id, ada, { huddles: false });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ room: { ...room, huddles: false } satisfies SharedRoom });
+    expect(((await (await settings(room.id, grace)).json()) as RoomSettings).room).toEqual({ ...room, huddles: false });
+    expect(await listed(room.id, grace)).toMatchObject({ ...room, huddles: false });
+    // In that room alone.
+    expect(await listed(other.id, grace)).not.toHaveProperty("huddles");
+    expect(await kept(other.id)).toEqual([{ huddles_allowed: 1 }]);
+  });
+
+  it("keeps huddles off through the room's other changes, and allows them again once its settings say so", async () => {
+    const ada = await administrator("Ada");
+    const room = await createRoom("Announcements", { as: ada });
+    expect((await change(room.id, ada, { huddles: false })).status).toBe(200);
+
+    const news: SharedRoom = { ...room, name: "News", icon: "rocket", kind: "closed", huddles: false };
+    expect(await (await change(room.id, ada, { name: "News", icon: "rocket", kind: "closed", memberIds: [ada.user.id] })).json()).toEqual({ room: news });
+    expect(await (await change(room.id, ada, {})).json()).toEqual({ room: news });
+
+    const { room: allowing } = (await (await change(room.id, ada, { huddles: true })).json()) as { room: SharedRoom };
+    expect(allowing).toEqual({ ...room, name: "News", icon: "rocket", kind: "closed" });
+    expect(allowing).not.toHaveProperty("huddles");
+    expect(await listed(room.id, ada)).not.toHaveProperty("huddles");
+    expect(await kept(room.id)).toEqual([{ huddles_allowed: 1 }]);
+  });
+
+  it("takes only true or false, and otherwise keeps the room as it is", async () => {
+    const ada = await administrator("Ada");
+    const room = await createRoom("Design", { as: ada });
+    for (const huddles of [null, 0, "false", "off"]) {
+      const response = await change(room.id, ada, { name: "Renamed", huddles });
+      expect(response.status, JSON.stringify(huddles)).toBe(422);
+      expect(await response.json()).toEqual({ error: "Huddles must be true or false" });
+    }
+    expect(await nameOf(room.id)).toBe("Design");
+    expect(await kept(room.id)).toEqual([{ huddles_allowed: 1 }]);
+  });
+
+  it("is an administrator's to turn off and on, and not the room's creator's, who can change the rest of it, nor anyone else's in it", async () => {
+    const [ada, grace, linus] = [await signIn("Ada"), await signIn("Grace"), await signIn("Linus")];
+    const room = await createRoom("Design", { as: ada });
+    await promote(grace);
+
+    // Linus can't change the room, and Ada, who made it, hears whose its huddles are, and changes nothing sent with them.
+    const asLinus = await change(room.id, linus, { huddles: false });
+    expect(asLinus.status).toBe(403);
+    expect(await asLinus.json()).toEqual({ error: "Only administrators and the room's creator can change it" });
+    const asAda = await change(room.id, ada, { name: "Renamed", huddles: false });
+    expect(asAda.status).toBe(403);
+    expect(await asAda.json()).toEqual({ error: "Only administrators can turn huddles on or off in a room" });
+    expect(await nameOf(room.id)).toBe("Design");
+    expect(await kept(room.id)).toEqual([{ huddles_allowed: 1 }]);
+
+    // Grace, an administrator who didn't make it, turns them off, and Ada can't turn them on again.
+    expect((await change(room.id, grace, { huddles: false })).status).toBe(200);
+    expect(await kept(room.id)).toEqual([{ huddles_allowed: 0 }]);
+    expect((await change(room.id, ada, { huddles: true })).status).toBe(403);
+    expect(await kept(room.id)).toEqual([{ huddles_allowed: 0 }]);
+    expect((await change(room.id, grace, { huddles: true })).status).toBe(200);
+    expect(await kept(room.id)).toEqual([{ huddles_allowed: 1 }]);
+  });
+
+  it("takes huddles sent as they are from the room's creator, with the room's other changes, as it turns nothing on or off", async () => {
+    const [ada, grace] = [await signIn("Ada"), await signIn("Grace")];
+    const room = await createRoom("Design", { as: ada });
+    await promote(grace);
+
+    expect(await (await change(room.id, ada, { name: "Studio", huddles: true })).json()).toEqual({ room: { ...room, name: "Studio" } });
+    expect((await change(room.id, grace, { huddles: false })).status).toBe(200);
+    expect(await (await change(room.id, ada, { name: "Design", huddles: false })).json()).toEqual({ room: { ...room, huddles: false } });
+    expect(await kept(room.id)).toEqual([{ huddles_allowed: 0 }]);
+  });
+
+  it("tells a room's settings that an administrator can turn its huddles on or off, and that its creator and everyone else in it can't", async () => {
+    const [ada, grace, linus] = [await signIn("Ada"), await signIn("Grace"), await signIn("Linus")];
+    const room = await createRoom("Design", { as: ada });
+    await promote(grace);
+    const can = async (session: Session) => {
+      const { canAdminister, canChangeHuddles } = (await (await settings(room.id, session)).json()) as RoomSettings;
+      return { canAdminister, canChangeHuddles };
+    };
+
+    expect(await can(ada)).toEqual({ canAdminister: true, canChangeHuddles: false });
+    expect(await can(grace)).toEqual({ canAdminister: true, canChangeHuddles: true });
+    expect(await can(linus)).toEqual({ canAdminister: false, canChangeHuddles: false });
+  });
+
+  it("records no change when huddles are already as the room's settings say", async () => {
+    const ada = await administrator("Ada");
+    const room = await createRoom("Design", { as: ada });
+    const changedAt = () => workspaceSql("SELECT updated_at FROM rooms WHERE id = ?", room.id);
+    const then = () => workspaceSql("UPDATE rooms SET updated_at = 'then' WHERE id = ?", room.id);
+
+    await then();
+    expect((await change(room.id, ada, { huddles: true })).status).toBe(200);
+    expect(await changedAt()).toEqual([{ updated_at: "then" }]);
+    expect((await change(room.id, ada, { huddles: false })).status).toBe(200);
+    expect(await changedAt()).not.toEqual([{ updated_at: "then" }]);
+
+    await then();
+    expect((await change(room.id, ada, { huddles: false })).status).toBe(200);
+    expect(await changedAt()).toEqual([{ updated_at: "then" }]);
+  });
+
+  it("starts a new room with huddles allowed, whatever New room is sent of them", async () => {
+    const ada = await signIn("Ada");
+    const response = await api("/api/rooms", { method: "POST", headers: { Cookie: ada.cookie }, body: JSON.stringify({ kind: "open", name: "Design", huddles: false }) });
+    expect(response.status).toBe(201);
+    const { room } = (await response.json()) as { room: SharedRoom };
+    expect(room).not.toHaveProperty("huddles");
+    expect(await kept(room.id)).toEqual([{ huddles_allowed: 1 }]);
+  });
+});
+
+describe("Allow @channel, @here and @everyone in a room", () => {
+  /** A room as `session`'s sidebar lists it. */
+  const listed = async (roomId: RoomId, session: Session) => ((await (await api("/api/sidebar", as(session))).json()) as Sidebar).rooms.find((room) => room.id === roomId);
+
+  /** What the Workspace keeps of whether a room's settings let them notify it. */
+  const kept = (roomId: RoomId) => workspaceSql("SELECT channel_mentions_allowed FROM rooms WHERE id = ?", roomId);
+
+  it("lets them notify a room until an administrator turns them off, which its settings and its people's sidebars then say", async () => {
+    const [ada, grace] = [await signIn("Ada"), await signIn("Grace")];
+    await promote(ada);
+    const [room, other] = [await createRoom("Announcements", { as: ada }), await createRoom("Design", { as: ada })];
+    expect(room).not.toHaveProperty("channelMentions");
+
+    const response = await change(room.id, ada, { channelMentions: false });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ room: { ...room, channelMentions: false } satisfies SharedRoom });
+    expect(((await (await settings(room.id, grace)).json()) as RoomSettings).room).toEqual({ ...room, channelMentions: false });
+    expect(await listed(room.id, grace)).toMatchObject({ ...room, channelMentions: false });
+    expect(await kept(room.id)).toEqual([{ channel_mentions_allowed: 0 }]);
+    // In that room alone.
+    expect(await listed(other.id, grace)).not.toHaveProperty("channelMentions");
+    expect(await kept(other.id)).toEqual([{ channel_mentions_allowed: 1 }]);
+
+    // They stay off through the room's other changes, huddles' too, until it allows them again.
+    const news: SharedRoom = { ...room, name: "News", channelMentions: false, huddles: false };
+    expect(await (await change(room.id, ada, { name: "News", huddles: false })).json()).toEqual({ room: news });
+    const { room: allowing } = (await (await change(room.id, ada, { channelMentions: true })).json()) as { room: SharedRoom };
+    expect(allowing).toEqual({ ...room, name: "News", huddles: false });
+    expect(await kept(room.id)).toEqual([{ channel_mentions_allowed: 1 }]);
+  });
+
+  it("is an administrator's to turn off and on, and not the room's creator's, nor anyone else's in it, who may send it as it is", async () => {
+    const [ada, grace, linus] = [await signIn("Ada"), await signIn("Grace"), await signIn("Linus")];
+    const room = await createRoom("Design", { as: ada });
+    await promote(grace);
+    const can = async (session: Session) => ((await (await settings(room.id, session)).json()) as RoomSettings).canChangeChannelMentions;
+    expect([await can(ada), await can(grace), await can(linus)]).toEqual([false, true, false]);
+
+    const asAda = await change(room.id, ada, { name: "Renamed", channelMentions: false });
+    expect(asAda.status).toBe(403);
+    expect(await asAda.json()).toEqual({ error: "Only administrators can turn @channel, @here and @everyone on or off in a room" });
+    expect((await change(room.id, linus, { channelMentions: false })).status).toBe(403);
+    expect(await nameOf(room.id)).toBe("Design");
+    expect(await kept(room.id)).toEqual([{ channel_mentions_allowed: 1 }]);
+
+    expect(await (await change(room.id, ada, { name: "Studio", channelMentions: true })).json()).toEqual({ room: { ...room, name: "Studio" } });
+    expect((await change(room.id, grace, { channelMentions: false })).status).toBe(200);
+    expect((await change(room.id, ada, { channelMentions: true })).status).toBe(403);
+    expect(await kept(room.id)).toEqual([{ channel_mentions_allowed: 0 }]);
+  });
+
+  it("takes only true or false, and otherwise keeps the room as it is", async () => {
+    const ada = await signIn("Ada");
+    await promote(ada);
+    const room = await createRoom("Design", { as: ada });
+    for (const channelMentions of [null, 0, "false"]) {
+      const response = await change(room.id, ada, { name: "Renamed", channelMentions });
+      expect(response.status, JSON.stringify(channelMentions)).toBe(422);
+      expect(await response.json()).toEqual({ error: "Room-wide mentions must be true or false" });
+    }
+    expect(await nameOf(room.id)).toBe("Design");
+    expect(await kept(room.id)).toEqual([{ channel_mentions_allowed: 1 }]);
   });
 });
 
@@ -384,5 +599,105 @@ describe("Add and remove private room members", () => {
     for (const query of [await plan(QUEUE_MEMBER_REVOCATIONS, CloseCode.Reconnect, 0, "room", "[]"), await plan(REVOKE_ROOM_FROM_OTHERS, "room", "[]")]) {
       expect(query).toMatch(/SEARCH memberships USING (COVERING )?INDEX sqlite_autoindex_memberships_1 \(room_id=\?\)/);
     }
+    for (const query of [await plan(QUEUE_REVOCATIONS_OF_MEMBERS, CloseCode.Reconnect, 0, "room", "[]"), await plan(REVOKE_ROOM_FROM_USERS, "room", "[]")]) {
+      expect(query).toMatch(/SEARCH memberships USING (COVERING )?INDEX sqlite_autoindex_memberships_1 \(room_id=\? AND user_id=\?\)/);
+    }
+  });
+});
+
+describe("Put people in a private room, or take them out, as /invite and /remove do", () => {
+  it("puts in and takes out only whom it names, undoing nothing changed in the room meanwhile, and answers the room", async () => {
+    const [ada, grace, linus, mary] = [await signIn("Ada"), await signIn("Grace"), await signIn("Linus"), await signIn("Mary")];
+    const room = await createRoom("Leads", { closedTo: [ada.user.id, grace.user.id, linus.user.id], as: ada });
+
+    const response = await changeMembers(room.id, ada, { addedIds: [mary.user.id, "nobody"], removedIds: [linus.user.id] });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ room });
+    expect(await membersOf(room.id)).toEqual(ids(ada, grace, mary));
+
+    // Its settings take Grace out, which putting Linus back in leaves as it is, as does taking out someone who isn't in it.
+    expect((await change(room.id, ada, { kind: "closed", memberIds: ids(ada, mary) })).status).toBe(200);
+    expect((await changeMembers(room.id, ada, { addedIds: [linus.user.id] })).status).toBe(200);
+    expect((await changeMembers(room.id, ada, { removedIds: [grace.user.id] })).status).toBe(200);
+    expect(await membersOf(room.id)).toEqual(ids(ada, linus, mary));
+    expect(await workspaceSql("SELECT DISTINCT involvement FROM memberships WHERE room_id = ?", room.id)).toEqual([{ involvement: "mentions" }]);
+  });
+
+  it("closes the sockets there of whom it takes out, who find it gone, and shows it in the sidebars of whom it puts in", async () => {
+    const [ada, grace, linus, mary] = [await signIn("Ada"), await signIn("Grace"), await signIn("Linus"), await signIn("Mary")];
+    const room = await createRoom("Leads", { closedTo: [ada.user.id, grace.user.id, linus.user.id], as: ada });
+    const graceInRoom = await connect(room.id, grace);
+    const closed = closeOf((await connect(room.id, linus)).ws);
+    const [linussTab, marysTab] = [await openWorkspaceSocket(linus), await openWorkspaceSocket(mary)];
+
+    expect((await changeMembers(room.id, ada, { addedIds: [mary.user.id], removedIds: [linus.user.id] })).status).toBe(200);
+    expect(await closed).toMatchObject({ code: CloseCode.Reconnect, reason: "Reconnect" });
+    expect(await reconnect(room.id, linus)).toBe(CloseCode.NotFound);
+    expect(await workspaceSql("SELECT * FROM pending_revocations")).toEqual([]);
+    expect(await linussTab.next()).toEqual({ type: "room.gone", roomId: room.id });
+    expect(await marysTab.next()).toEqual({ type: "room.saved", room });
+
+    // Everyone else is still there.
+    expect((await post(graceInRoom, "Still here")).body).toBe("Still here");
+    expect(await graceInRoom.next("presence.left")).toEqual({ type: "presence.left", userId: linus.user.id });
+    await settle(graceInRoom);
+  });
+
+  it("still closes the sockets of the people it takes out when the database saves the change but its answer is lost", async () => {
+    const [ada, grace] = [await signIn("Ada"), await signIn("Grace")];
+    const room = await createRoom("Leads", { closedTo: [ada.user.id, grace.user.id], as: ada });
+    const closed = closeOf((await connect(room.id, grace)).ws);
+    await runInDurableObject(workspaceStub(), (workspace: Workspace) => {
+      const store = (workspace as unknown as { store: WorkspaceStore }).store;
+      const changeMembers = store.changeMembers.bind(store);
+      store.changeMembers = async (...args) => {
+        await changeMembers(...args);
+        throw new Error("The database's answer was lost");
+      };
+    });
+
+    expect((await changeMembers(room.id, ada, { removedIds: [grace.user.id] })).status).toBe(500);
+    expect(await closed).toMatchObject({ code: CloseCode.Reconnect, reason: "Reconnect" });
+    expect(await reconnect(room.id, grace)).toBe(CloseCode.NotFound);
+  });
+
+  it("refuses an open room, which takes in everyone, and anyone who can't change the room, before checking what they sent, changing nothing", async () => {
+    const [ada, grace] = [await signIn("Ada"), await signIn("Grace")];
+    const [open, room] = [await createRoom("Design", { as: ada }), await createRoom("Leads", { closedTo: [ada.user.id, grace.user.id], as: ada })];
+
+    const opened = await changeMembers(open.id, ada, { removedIds: [grace.user.id] });
+    expect(opened.status).toBe(409);
+    expect(await opened.json()).toEqual({ error: "Everyone is in an open room, so nobody can be put in it or taken out" });
+    for (const body of [{ removedIds: [ada.user.id] }, { removedIds: "everyone" }]) {
+      const response = await changeMembers(room.id, grace, body);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "Only administrators and the room's creator can change it" });
+    }
+    const unparsed = await changeMembers(room.id, ada, { addedIds: [grace.user.id], removedIds: [grace.user.id] });
+    expect(unparsed.status).toBe(422);
+    expect(await unparsed.json()).toEqual({ error: "Nobody can be put in a room and taken out of it at once" });
+    expect(await membersOf(open.id)).toEqual(ids(ada, grace));
+    expect(await membersOf(room.id)).toEqual(ids(ada, grace));
+  });
+
+  it("answers 404 to people who aren't in the room, and for missing rooms and DMs, asks who's signed in, and refuses changes from other sites", async () => {
+    const [ada, grace] = [await signIn("Ada"), await signIn("Grace")];
+    await promote(grace);
+    const room = await createRoom("Leads", { closedTo: [ada.user.id], as: ada });
+    const dm = await direct(ada, grace);
+
+    for (const [roomId, session] of [[room.id, grace], ["nowhere", ada], [dm.id, ada], ["%FF", ada]] as const) {
+      const response = await changeMembers(roomId, session, { addedIds: [grace.user.id] });
+      expect(response.status, roomId).toBe(404);
+      expect(await response.json()).toEqual({ error: "Room not found or inaccessible" });
+    }
+    expect((await api(`/api/rooms/${room.id}/members`, { method: "PATCH", body: JSON.stringify({ addedIds: [grace.user.id] }) })).status).toBe(401);
+    const crossSite = await api(`/api/rooms/${room.id}/members`, {
+      method: "PATCH",
+      headers: { Cookie: ada.cookie, Origin: "https://evil.test" },
+      body: JSON.stringify({ addedIds: [grace.user.id] }),
+    });
+    expect(crossSite.status).toBe(422);
+    expect(await membersOf(room.id)).toEqual(ids(ada));
   });
 });

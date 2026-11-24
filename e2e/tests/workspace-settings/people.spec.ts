@@ -21,6 +21,8 @@ test.describe("Make or revoke administrators", () => {
     const grace = await join(browser, baseURL!, await page.getByRole("textbox", { name: "Share to invite more people" }).inputValue(), name);
     const rail = grace.getByRole("navigation", { name: "Workspace" });
     await rail.getByRole("link", { name: "Workspace" }).click();
+    // Community settings shows its links while it loads, then draws them again once it has, losing a click that comes as it does.
+    await expect(grace).toHaveTitle("Community settings");
     await grace.getByRole("link", { name: "Membership" }).click();
     const gracesPeople = grace.getByRole("region", { name: "Membership" });
     await expect(gracesPeople.getByRole("list", { name: "Members" }).getByRole("listitem").filter({ hasText: name })).toBeVisible();
@@ -49,6 +51,42 @@ test.describe("Make or revoke administrators", () => {
     await expect(rail.getByRole("link", { name: "Workspace" })).toBeVisible();
     await expect(grace.getByRole("link", { name: "Chat bots" })).toHaveCount(0);
     await expect(grace.getByRole("checkbox")).toHaveCount(0);
+    await grace.context().close();
+  });
+});
+
+test.describe("Welcome someone who joins", () => {
+  test("starts a DM with each person here as someone joins, which opens with their having joined, and which they see once someone writes in it", async ({ page, browser, baseURL }) => {
+    await useOwnAddress(page);
+    await page.goto("/account/edit#membership-settings");
+    await signInAsAdministrator(page);
+    const joinUrl = await page.getByRole("textbox", { name: "Share to invite more people" }).inputValue();
+    await page.getByRole("link", { name: "Home", exact: true }).click();
+    await expect(editorField(page, "Write a message")).toBeVisible();
+
+    const name = `Grace ${crypto.randomUUID().slice(0, 8)}`;
+    const grace = await join(browser, baseURL!, joinUrl, name);
+    // The administrator's sidebar lists it as it starts, with her active, as her tab is in use.
+    const withGrace = page.getByRole("region", { name: "DMs" }).getByRole("link", { name: `Direct message with ${name}`, exact: true });
+    await expect(withGrace).toHaveAccessibleDescription("Active");
+    await expect(withGrace.locator("[data-presence]")).toHaveAttribute("data-presence", "active");
+    await withGrace.click();
+    const joined = page.getByRole("log").getByRole("article").first();
+    await expect(joined.getByRole("heading", { level: 3 })).toContainText(name);
+    await expect(joined).toContainText(/joined /);
+
+    // Hers waits for a message, then counts it.
+    const withAda = grace.getByRole("region", { name: "DMs" }).getByRole("link", { name: `Direct message with ${ADMINISTRATOR.name}`, exact: true });
+    await expect(withAda).toHaveCount(0);
+    const composer = editorField(page, "Write a message");
+    await composer.pressSequentially("Welcome aboard!");
+    await composer.press("Enter");
+    await expect(withAda).toHaveAccessibleDescription("Active 1 unread message");
+    await expect(withAda.getByText("1", { exact: true })).toBeVisible();
+    await withAda.click();
+    await expect(grace.getByRole("log").getByRole("article").first()).toContainText(/joined /);
+    await expect(grace.getByRole("log")).toContainText("Welcome aboard!");
+    await expect(withAda).toHaveAccessibleDescription("Active");
     await grace.context().close();
   });
 });

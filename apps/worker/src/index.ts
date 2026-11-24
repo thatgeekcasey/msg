@@ -3,6 +3,8 @@ import {
   CloseCode,
   CURRENT_PASSWORD_NEEDED,
   CURRENT_PASSWORD_WRONG,
+  DELETION_NAME_NEEDED,
+  DELETION_PASSWORD_NEEDED,
   EMAIL_DOMAIN_NEEDS_EMAIL,
   EMAIL_SIGN_UP_PATH,
   INVITATION_PATH,
@@ -16,42 +18,53 @@ import {
   MEMBERFUL_DISCONNECT_WITHOUT_PASSWORD,
   MEMBERFUL_NOT_CONNECTED,
   MEMBERFUL_PASSWORD_NEEDED,
-  MEMBERFUL_SIGN_IN_NEEDED,
   MEMBERFUL_SIGN_IN_PATH,
   MEMBERFUL_SIGN_IN_PROBLEMS,
   MEMBERFUL_WEBHOOK_PATH,
   NAME_RESERVED,
   NO_EMAIL_DOMAINS,
+  ONLY_ADMINISTRATOR,
   PASSWORD_RESET_PATH,
+  PASSWORD_WITH_MEMBERFUL,
   isPasswordTooLong,
   isReservedName,
   isRoomId,
+  isSectionId,
+  MAX_SECTIONS,
+  notTakingDirects,
   OPEN_WITH_MEMBERFUL,
   parseAccountChanges,
+  parseAccountDeletion,
   parseCustomDomainCheck,
   parseCustomStyles,
   parseFavoriteOrder,
   parseInvolvementChange,
   parseMemberfulDisconnection,
-  parseSharedOrder,
+  parseMembersChange,
+  parseRoomLayout,
   parseNewDirect,
   parseNewRoom,
+  parseNotificationsPause,
   parseProfileChanges,
   parseResendApiKey,
   parseRoleChange,
   parseSendingDomainCheck,
   parseRoomChanges,
+  parseSectionName,
   parseTurnstileKeysChange,
   PROFILE_PATH,
   SIGN_IN_LIMITED,
   SIGN_IN_REJECTED,
   signOutEndpointOf,
+  signsInElsewhereOnly,
   SIGN_UP_PATH,
   TRANSFER_PATH,
   TURNSTILE_CHECK_PATH,
+  USERNAME_TAKEN,
   workspacePageOf,
   type Account,
   type Bootstrap,
+  type ChangedBlocks,
   type ChangedPerson,
   type CustomDomainCheck,
   type CustomDomainLookup,
@@ -60,15 +73,20 @@ import {
   type EmailSettings,
   type Favorites,
   type Involvement,
-  type MemberfulConnection,
+  type MemberfulAccount,
   type MemberfulStatus,
   type NewJoinCode,
   type NewRoomForm,
+  type NotificationsPaused,
+  type NotifiedCounts,
   type PersonAnswer,
   type ProfileAnswer,
   type ReleaseCheck,
   type RoomId,
   type RoomSettings,
+  type SavedRoomLayout,
+  type Section,
+  type SectionId,
   type SendingDomainCheck,
   type SentTestEmail,
   type Sidebar,
@@ -78,7 +96,30 @@ import {
   type WorkspaceSettings,
 } from "@ember/protocol";
 import { agentsName } from "@ember/protocol/agents";
-import { mentionPromptItem } from "@ember/richtext";
+import { BLOCKED_WORDS_REFUSED } from "@ember/protocol/blocked-words";
+import { parseHuddleSoundChanges, type HuddleSoundsChanged, type PastHuddles } from "@ember/protocol/huddles";
+import { OUTSIDE_AUTHORIZE_PATH } from "@ember/protocol/outside";
+import { parseNewReport, parseReportHandling, type HandledReports, type Reports } from "@ember/protocol/reports";
+import {
+  MEMBERFUL_WITH_SSO,
+  OPEN_WITH_SSO,
+  PASSWORD_WITH_SSO,
+  SSO_CALLBACK_PATH,
+  SSO_CONNECTIONS_PATH,
+  SSO_DISCONNECT_PASSWORD_NEEDED,
+  SSO_DISCONNECT_WITHOUT_EMAIL,
+  SSO_DISCONNECT_WITHOUT_PASSWORD,
+  SSO_LOGOUT_PATH,
+  SSO_NOT_CONNECTED,
+  SSO_PASSWORD_NEEDED,
+  SSO_SETTINGS_PATH,
+  SSO_SIGN_IN_PATH,
+  SSO_SIGN_IN_PROBLEMS,
+  SSO_WITH_MEMBERFUL,
+  type ElsewhereConnection,
+  type SsoStatus,
+} from "@ember/protocol/sso";
+import { mentionPromptItem, specialMentionPromptItem, type SpecialMention } from "@ember/richtext";
 import { isAccountLogoPath, showAccountLogo, storeLogo } from "./account-logo";
 import {
   clientOf,
@@ -87,6 +128,7 @@ import {
   expiredSessionCookie,
   isCrossSite,
   isHttps,
+  isReadFromAnotherSite,
   isSameOriginUpgrade,
   newSessionToken,
   sessionCookie,
@@ -95,7 +137,26 @@ import {
   tokenDigest,
 } from "./auth";
 import { directoryOf } from "./avatar-tokens";
-import { agentPage, changeAgent, createAgent, deleteAgent, listAgents, removeAgentAvatar, showAgent, tryAgent } from "./assistant/agents";
+import {
+  appPage,
+  beginAppSignIn,
+  beginNewAppSignIn,
+  beginOwnAppSignIn,
+  changeApp,
+  clientDocument,
+  connectApp,
+  disconnectApp,
+  finishAppSignIn,
+  listApps,
+  pickAgentTools,
+  readAppTools,
+  showAgentTools,
+  showApp,
+  signOutOfApp,
+} from "./apps/api";
+import { answerOutsideAsk, changeOutsideAi, describeOutsideAsk, disconnectOutside, isOutsideRegistration, outsideAction, outsideConnectPage } from "./outside/api";
+import { CLIENT_DOCUMENT_PATH } from "./apps/oauth";
+import { agentPage, changeAgent, createAgent, deleteAgent, listAgents, listAvailableAgents, removeAgentAvatar, showAgent, tryAgent } from "./assistant/agents";
 import {
   addAssistantModel,
   changeAssistantAvatar,
@@ -104,7 +165,7 @@ import {
   changeYourAssistant,
   deployedAccountIdOf,
   forgetAssistant,
-  listAssistantModels,
+  listOfferedModels,
   removeAssistantAvatar,
   removeAssistantModel,
   saveAssistant,
@@ -125,13 +186,23 @@ import { CSP_REPORT_PATH, cspReport } from "./csp";
 import { addressRefusal, answerProbe, deployedAddressOf, lookUpDns, originFor, probeOf, reachOf } from "./custom-domain";
 import { redirectToHttps, requiresHttps, withHeaders } from "./headers";
 import { health, isUpPath, up } from "./health";
-import { forgetHuddles, saveHuddles } from "./huddles/settings";
+import { forgetHuddleRelay, forgetHuddles, saveHuddleRelay, saveHuddles } from "./huddles/settings";
+import { finishSsoSignIn, forgetSso, saveSso, ssoBackchannelLogout, ssoConnectionFor, ssoRefusal, startSsoSignIn } from "./sso";
 import { invite, lookUpEmailLink, resendInvitation, revokeInvitation } from "./invitations";
 import { askForEmailLink, emailSignUpPage, invitationPage, join, joinCodeOf, joinPage, joinWithEmailLink, signUp, signUpPage } from "./join";
 import { checkResendApiKey } from "./mail";
 import { manifest, manifestFormatOf } from "./manifest";
-import { finishMemberfulSignIn, memberfulConnectionFor, memberfulRefusal, memberfulWebhook, memberfulWebhooksOf, startMemberfulSignIn } from "./memberful";
-import { memberfulKeysOf } from "./memberful-api";
+import {
+  finishMemberfulSignIn,
+  memberfulConnectionFor,
+  memberfulRefusal,
+  memberfulSiteFor,
+  memberfulWebhook,
+  saveMemberfulKeys,
+  startMemberfulSignIn,
+  withDeployedMemberful,
+} from "./memberful";
+import { deployedMemberfulOf } from "./memberful-api";
 import { anyOtherPage, formAnswer } from "./pages";
 import { askForPasswordReset, passwordResetPage, resetPasswordWithCode } from "./password-resets";
 import { DUMMY_DIGEST, passwordHasher } from "./passwords";
@@ -141,7 +212,7 @@ import { showQrCode } from "./qr-code";
 import { RECOVERY_PATH, resetPassword } from "./recovery";
 import { releaseCheck } from "./releases";
 import { urlOf } from "./request-url";
-import { MAX_ADDRESS_LENGTH } from "./revocations";
+import { taggedAddress } from "./revocations";
 import { clearSearches, recordSearch, searchMessages } from "./searches";
 import { isOnboardedToEmailSending } from "./sending-domain";
 import { checkSetup, firstRun, isSetupPath, setupAccessOf, setupPage, setupPlaceholdersOf } from "./setup";
@@ -152,8 +223,21 @@ import { unfurlLink } from "./unfurl";
 import { isFromUnsupportedBrowser, unsupportedBrowserPage } from "./unsupported-browser";
 import { platformOf } from "./user-agent";
 import { versionOf } from "./version";
-import { ACCOUNT_BEFORE_SETUP, CREDENTIALS_HEADER, workspace, type YourProfile } from "./workspace";
+import type { SsoProvider } from "./sso-provider";
+import {
+  ACCOUNT_BEFORE_SETUP,
+  CREDENTIALS_HEADER,
+  signInNeededWith,
+  workspace,
+  type Credentials,
+  type OnlyWay,
+  type SectionRefusal,
+  type SignInElsewhere,
+  type YourProfile,
+} from "./workspace";
 
+export { AppConnector } from "./apps/connector";
+export { OutsideAi } from "./outside/endpoint";
 export { ChatRoom } from "./chat-room";
 export { PasswordHasher } from "./passwords";
 export { SearchIndex } from "./search-index";
@@ -177,7 +261,7 @@ async function signIn(request: Request, env: Env): Promise<Response> {
 }
 
 /**
- * The sign-in: every attempt counts against its IP address's limit before anything is checked, and an
+ * The sign-in: every attempt counts against its network's limit before anything is checked, and an
  * unknown email address costs a password check too, so the answer's timing doesn't say who has an
  * account. While Memberful is members only, only an administrator signs in with a password. Anyone else
  * whose password checks out goes on to connect their Memberful account, as 202 says, to come back to
@@ -212,9 +296,9 @@ async function signInWithPassword({ emailAddress, password, returnTo }: Record<s
       user = await workspace(env).startSession(kept.userId, kept.passwordDigest, null, digest, client);
     }
   }
-  if (user === "memberful") {
-    const connecting = found && (await memberfulConnectionFor(request, env, found.userId, found.passwordDigest, returnTo));
-    return connecting ? connectionAnswer(connecting) : problem(403, MEMBERFUL_SIGN_IN_NEEDED);
+  if (typeof user === "string") {
+    const connecting = found && (await connectionsFor(request, env, user, found.userId, found.passwordDigest, returnTo));
+    return connecting ? connectionAnswer(connecting) : problem(403, signInNeededWith(user));
   }
   if (!user) return problem(401, SIGN_IN_REJECTED);
   return json({ user }, { status: 201, headers: { "Set-Cookie": sessionCookie(request, token) } });
@@ -222,7 +306,8 @@ async function signInWithPassword({ emailAddress, password, returnTo }: Record<s
 
 /**
  * Signs someone in with just a name, as someone new every time, when EMBER_GUEST_SIGN_IN allows it,
- * unless Memberful is members only, or the name is @ember's or an agent's.
+ * unless Memberful is members only, or single sign-on the only way in, or the name is @ember's or an
+ * agent's, or has a word Blocked words keeps out.
  */
 async function signInGuest(given: unknown, request: Request, env: Env): Promise<Response> {
   if (!guestSignIn(env)) return problem(403, "Signing in with just a name is turned off");
@@ -232,8 +317,9 @@ async function signInGuest(given: unknown, request: Request, env: Env): Promise<
 
   const token = newSessionToken();
   const user = await workspace(env).signInGuest(name, await tokenDigest(token, env.SESSION_SECRET), clientOf(request));
-  if (user === "memberful") return problem(403, MEMBERFUL_SIGN_IN_NEEDED);
   if (user === "agent's name") return problem(422, agentsName(name));
+  if (user === "blocked words") return problem(422, BLOCKED_WORDS_REFUSED);
+  if (typeof user === "string") return problem(403, signInNeededWith(user));
   return json({ user }, { status: 201, headers: { "Set-Cookie": sessionCookie(request, token) } });
 }
 
@@ -243,16 +329,17 @@ async function signInGuest(given: unknown, request: Request, env: Env): Promise<
  */
 async function bootstrap(request: Request, env: Env): Promise<Response> {
   const token = sessionToken(request);
-  const [{ account, user, signInWithMemberful, passwordResetCodes, turnstileSiteKey }, push] = await Promise.all([
-    workspace(env).bootstrap(token ? await credentialsFor(token, request, env) : null, memberfulKeysOf(env)?.site ?? null, deployedAddressOf(request)),
+  const [{ account, user, signInWithMemberful, signInWithSso, passwordResetCodes, turnstileSiteKey }, push] = await Promise.all([
+    workspace(env).bootstrap(token ? await credentialsFor(token, request, env) : null, deployedMemberfulOf(env)?.site ?? null, deployedAddressOf(request)),
     webPush(env),
   ]);
   const body: Bootstrap = {
     setup: account ? "complete" : "pending",
     setupAccess: setupAccessOf(request, env),
     setupPlaceholders: setupPlaceholdersOf(env),
-    guestSignIn: guestSignIn(env) && !account?.memberfulSignIn,
+    guestSignIn: guestSignIn(env) && !(account && signsInElsewhereOnly(account)),
     signInWithMemberful,
+    signInWithSso,
     // The deployment's keys take the place of any an administrator gave.
     turnstileSiteKey: turnstileKeysOf(env)?.siteKey ?? turnstileSiteKey,
     passwordResetCodes,
@@ -278,10 +365,10 @@ async function me(request: Request, env: Env): Promise<Response> {
 
 /**
  * Workspace settings, which anyone signed in may see, read-only unless they're an administrator, with
- * the Memberful site whose members can sign in, once the deployment has its keys, whether it hears the
- * site's webhooks, where Turnstile's keys come from, the deployment's taking the place of any an
- * administrator gave, and, for administrators, the Cloudflare account Ember is deployed to. They hold
- * the join code, which no cache should keep, as the sidebar's invitation does.
+ * the Memberful site whose members can sign in, and whether Ember hears its webhooks, and where
+ * Turnstile's keys come from, the deployment's keys taking the place of any an administrator gave, and,
+ * for administrators, the Cloudflare account Ember is deployed to. They hold the join code, which no
+ * cache should keep, as the sidebar's invitation does.
  */
 async function workspaceSettings(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
@@ -289,12 +376,10 @@ async function workspaceSettings(request: Request, env: Env): Promise<Response> 
   if (!settings) return problem(401, "Not signed in");
   if (settings === "not set up") return problem(404, "Ember isn't set up yet");
   const deployment = {
-    memberfulSite: memberfulKeysOf(env)?.site ?? null,
-    memberfulWebhooks: memberfulWebhooksOf(env) !== null,
     turnstile: turnstileOf(env, settings.turnstile),
     cloudflareAccountId: settings.canAdminister ? deployedAccountIdOf(env) : null,
   };
-  return json({ ...settings, ...deployment } satisfies WorkspaceSettings, { headers: { "Cache-Control": "no-store" } });
+  return json({ ...withDeployedMemberful(env, settings), ...deployment } satisfies WorkspaceSettings, { headers: { "Cache-Control": "no-store" } });
 }
 
 /** Where Turnstile's keys come from: the deployment's secrets, which take the place of any others, or else `saved`, as the Workspace has those an administrator gave. */
@@ -402,20 +487,22 @@ async function regenerateJoinCode(request: Request, env: Env): Promise<Response>
  * Changes the workspace, as its settings save it. Someone who isn't an administrator hears so before
  * anything they sent is checked. Ember's address can only be the one the request came to, or a custom
  * domain or where a deploy puts Ember while it reaches Ember (`addressRefusal`), Memberful, or its
- * Members only, can only be turned on with the deployment's Memberful keys, and Email domain only with a
- * domain to let in, while Ember can send email. Turning any of them off always works.
+ * Members only, can only be turned on once Ember has Memberful's keys, single sign-on, or SSO only,
+ * once a provider is set up (`ssoRefusal`), and Email domain only with a domain to let in, while Ember
+ * can send email. Turning any of them off always works.
  */
 async function changeAccount(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
   if (!credentials) return problem(401, "Not signed in");
   const changes = parseAccountChanges(await jsonBodyOf(request));
   const refusal =
-    typeof changes === "string" ? changes : ((await addressRefusal(changes.customDomain, request, env, credentials)) ?? memberfulRefusal(changes.settings, env));
+    typeof changes === "string" ? changes : ((await addressRefusal(changes.customDomain, request, env, credentials)) ?? (await memberfulRefusal(changes.settings, env)) ?? (await ssoRefusal(changes.settings, env)));
   // Changes that are refused change nothing, but who's asking is still checked first.
   const account = await workspace(env).changeAccount(credentials, typeof changes === "string" || refusal ? {} : changes, urlOf(request).host);
   if (!account) return problem(401, "Not signed in");
   if (account === "forbidden") return problem(403, "Only administrators can change the workspace");
   if (account === "conflict") return problem(422, OPEN_WITH_MEMBERFUL);
+  if (account === "sso conflict") return problem(422, OPEN_WITH_SSO);
   if (account === "no email domains") return problem(422, NO_EMAIL_DOMAINS);
   if (account === "no email") return problem(422, EMAIL_DOMAIN_NEEDS_EMAIL);
   return refusal ? problem(422, refusal) : json({ account });
@@ -582,6 +669,83 @@ async function banPerson(request: Request, env: Env, userId: UserId): Promise<Re
   return json({ user: person } satisfies ChangedPerson);
 }
 
+/** Blocks someone, as Block on their page and in their messages' More actions does, answering whom you've blocked now. */
+async function block(request: Request, env: Env, userId: UserId): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  const blocked = credentials && (await workspace(env).block(credentials, userId));
+  if (!blocked) return problem(401, "Not signed in");
+  if (blocked === "not found") return problem(404, "Not found");
+  if (blocked === "yourself") return problem(422, "You can't block yourself");
+  return json(blocked satisfies ChangedBlocks);
+}
+
+/**
+ * Reports a message, as Report message in its More actions does, answering 204 once the administrators
+ * have the report, or had one of it from you already. Only someone in its room can, of someone else's.
+ */
+async function reportMessage(request: Request, env: Env, roomId: RoomId, messageId: string): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const report = parseNewReport(await jsonBodyOf(request));
+  if ("error" in report) return problem(422, report.error);
+  const reported = await workspace(env).reportMessage(credentials, roomId, messageId, report);
+  if (!reported) return problem(401, "Not signed in");
+  if (reported === "not found") return problem(404, "Not found");
+  if (reported === "yours") return problem(422, "You can't report your own message");
+  return new Response(null, { status: 204 });
+}
+
+/** Reports someone, as Report on their page does, for their name, picture or bio, answering as `reportMessage` does. */
+async function reportPerson(request: Request, env: Env, userId: UserId): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const report = parseNewReport(await jsonBodyOf(request));
+  if ("error" in report) return problem(422, report.error);
+  const reported = await workspace(env).reportPerson(credentials, userId, report);
+  if (!reported) return problem(401, "Not signed in");
+  if (reported === "not found") return problem(404, "Not found");
+  if (reported === "yourself") return problem(422, "You can't report yourself");
+  return new Response(null, { status: 204 });
+}
+
+/** The reports an administrator sees, as Membership's Reports list shows them. */
+async function listReports(request: Request, env: Env): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  const reports = credentials && (await workspace(env).listReports(credentials));
+  if (!reports) return problem(401, "Not signed in");
+  if (reports === "forbidden") return problem(403, "Only administrators can see reports");
+  return json(reports satisfies Reports, { headers: { "Cache-Control": "no-store" } });
+}
+
+/**
+ * Handles a report, as the Reports list's Delete message, Remove, Ban and Dismiss do, answering the
+ * reports it closed. Removing and banning answer as Remove and Ban do when they can't, and a report
+ * another administrator has handled answers 409.
+ */
+async function handleReport(request: Request, env: Env, reportId: string): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const handling = parseReportHandling(await jsonBodyOf(request));
+  if (!handling) return problem(422, "Delete the message, remove or ban whoever it reports, or dismiss the report");
+  const handled = await workspace(env).handleReport(credentials, reportId, handling.outcome);
+  if (!handled) return problem(401, "Not signed in");
+  if (handled === "forbidden") return problem(403, "Only administrators can handle reports");
+  if (handled === "not found") return problem(404, "Not found");
+  if (handled === "handled") return problem(409, "Another administrator has handled that report");
+  if (handled === "invalid") return problem(422, "Only a message's report can delete it");
+  if (handled === "unremovable") return problem(422, handling.outcome === "removed" ? "They can't be removed" : "They can't be banned");
+  if (handled === "yourself") return problem(403, "Administrators can't remove or ban themselves");
+  if (typeof handled === "string") return problem(422, BAN_PROBLEMS[handled]);
+  return json(handled satisfies HandledReports);
+}
+
+/** Unblocks someone, as Unblock on their page and in Blocked people on your profile does, answering as `block` does. */
+async function unblock(request: Request, env: Env, userId: UserId): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  const unblocked = credentials && (await workspace(env).unblock(credentials, userId));
+  return unblocked ? json(unblocked satisfies ChangedBlocks) : problem(401, "Not signed in");
+}
+
 /** Lifts someone's ban, as Remove ban on their page does, answering them as `banPerson` does. */
 async function unbanPerson(request: Request, env: Env, userId: UserId): Promise<Response> {
   const credentials = await credentialsOf(request, env);
@@ -594,13 +758,20 @@ async function unbanPerson(request: Request, env: Env, userId: UserId): Promise<
 
 /**
  * Your profile as its page shows it, with a new sign-in link for you, as each of Campfire's profile
- * pages has (users/profiles/_transfer.html.erb), and where you stand with Memberful, at the site the
- * deployment's keys name. No cache should keep it, since it holds your email address and the link.
+ * pages has (users/profiles/_transfer.html.erb), and where you stand with Memberful, at `site`, the one
+ * Ember has the keys of, if it has any, and with the single sign-on provider, if one is set up. No cache
+ * should keep it, since it holds your email address and the link.
  */
-async function profileAnswer({ transfer, profile, memberful }: YourProfile, env: Env): Promise<Response> {
-  const transferId = await newTransferId(transfer, env.SESSION_SECRET, Date.now());
-  const answer = { ...profile, memberful: memberfulStatusOf(memberful, memberfulKeysOf(env)?.site ?? null) };
+async function profileAnswer({ transfer, profile, elsewhere }: YourProfile, env: Env, site: string | null): Promise<Response> {
+  const [transferId, provider] = await Promise.all([newTransferId(transfer, env.SESSION_SECRET), elsewhere && workspace(env).ssoProvider()]);
+  const answer = { ...profile, memberful: memberfulStatusOf(elsewhere, site), sso: ssoStatusOf(elsewhere, provider ?? null) };
   return json({ profile: answer, transferId } satisfies ProfileAnswer, { headers: { "Cache-Control": "no-store" } });
+}
+
+/** The account you've connected at `issuer`, named as it was described, if you have. */
+function connectedAt(elsewhere: NonNullable<YourProfile["elsewhere"]>, issuer: string): MemberfulAccount | null {
+  const account = elsewhere.accounts.find((account) => account.issuer === issuer);
+  return account ? { name: account.name, emailAddress: account.emailAddress } : null;
 }
 
 /**
@@ -609,19 +780,30 @@ async function profileAnswer({ transfer, profile, memberful }: YourProfile, env:
  * connect. Null when there's nothing to show: without the site, for a guest, or while Memberful isn't
  * members only and you haven't connected one.
  */
-function memberfulStatusOf(memberful: YourProfile["memberful"], site: string | null): MemberfulStatus | null {
-  if (!memberful || site === null) return null;
-  const { membersOnly } = memberful;
-  const account = memberful.accounts.find((account) => account.issuer === site);
-  if (account) return { membersOnly, connected: { name: account.name, emailAddress: account.emailAddress } };
-  return membersOnly ? { membersOnly, connected: null } : null;
+function memberfulStatusOf(elsewhere: YourProfile["elsewhere"], site: string | null): MemberfulStatus | null {
+  if (!elsewhere || site === null) return null;
+  const { membersOnly } = elsewhere;
+  const connected = connectedAt(elsewhere, site);
+  return connected || membersOnly ? { membersOnly, connected } : null;
+}
+
+/**
+ * Where you stand with the single sign-on provider, for your profile, as with Memberful
+ * (`memberfulStatusOf`): the account you've connected there, or none yet while it's the only way in.
+ */
+function ssoStatusOf(elsewhere: YourProfile["elsewhere"], provider: SsoProvider | null): SsoStatus | null {
+  if (!elsewhere || provider === null) return null;
+  const { ssoOnly } = elsewhere;
+  const connected = connectedAt(elsewhere, provider.issuer);
+  return connected || ssoOnly ? { name: provider.name, ssoOnly, connected } : null;
 }
 
 /** Your profile, for its page. */
 async function profile(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
-  const yours = credentials && (await workspace(env).profile(credentials));
-  return yours ? profileAnswer(yours, env) : problem(401, "Not signed in");
+  if (!credentials) return problem(401, "Not signed in");
+  const [yours, site] = await Promise.all([workspace(env).profile(credentials), memberfulSiteFor(env)]);
+  return yours ? profileAnswer(yours, env, site) : problem(401, "Not signed in");
 }
 
 /**
@@ -630,8 +812,11 @@ async function profile(request: Request, env: Env): Promise<Response> {
  * takes is refused (422). An email address someone else has is refused. Changing your email address or
  * password, while you have one, takes your current password too, so that holding your session isn't
  * enough to take your account: it's checked as sign-in checks a password, counting against the same
- * limit (429), and refused (422) when it's missing or wrong. A new password ends your other sessions,
- * keeping this browser's push subscription at `pushSubscriptionEndpoint` and forgetting the rest.
+ * limit (429), and refused (422) when it's missing or wrong. Someone without a password whom Memberful
+ * signs in, as it does while Ember has the keys to the site they're linked at, or single sign-on does,
+ * while they're linked at the provider set up, is refused a first one (422), for the same reason: it
+ * would be a way in that holding their session was enough to make. A new password ends your other sessions, keeping this browser's push subscription at
+ * `pushSubscriptionEndpoint` and forgetting the rest.
  */
 async function changeProfile(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
@@ -639,9 +824,12 @@ async function changeProfile(request: Request, env: Env): Promise<Response> {
   const changes = parseProfileChanges(await jsonBodyOf(request));
   if (typeof changes === "string") return problem(422, changes);
   const { password, currentPassword, pushSubscriptionEndpoint, ...rest } = changes;
-  const check = await workspace(env).profileCheck(credentials, request.headers.get("CF-Connecting-IP") ?? "unknown", rest.emailAddress, Boolean(password));
+  const memberfulSite = await memberfulSiteFor(env);
+  const check = await workspace(env).profileCheck(credentials, request.headers.get("CF-Connecting-IP") ?? "unknown", rest.emailAddress, Boolean(password), memberfulSite);
   if (!check) return problem(401, "Not signed in");
   if (check === "limited") return problem(429, SIGN_IN_LIMITED);
+  if (check === "memberful") return problem(422, PASSWORD_WITH_MEMBERFUL);
+  if (check === "sso") return problem(422, PASSWORD_WITH_SSO);
   const checked = check.passwordDigest;
   if (checked !== null) {
     if (!currentPassword) return problem(422, CURRENT_PASSWORD_NEEDED);
@@ -649,89 +837,202 @@ async function changeProfile(request: Request, env: Env): Promise<Response> {
     if (isPasswordTooLong(currentPassword) || !(await passwordHasher(env).verify(currentPassword, checked)).matches) return problem(422, CURRENT_PASSWORD_WRONG);
   }
   const passwordDigest = password ? await passwordHasher(env).hash(password) : null;
-  const yours = await workspace(env).changeProfile(credentials, rest, passwordDigest, checked, pushSubscriptionEndpoint || null);
+  const yours = await workspace(env).changeProfile(credentials, rest, passwordDigest, checked, pushSubscriptionEndpoint || null, memberfulSite);
   if (!yours) return problem(401, "Not signed in");
+  if (yours === "memberful") return problem(422, PASSWORD_WITH_MEMBERFUL);
+  if (yours === "sso") return problem(422, PASSWORD_WITH_SSO);
   if (yours === "email address taken") return problem(422, "That email address has an account already");
   if (yours === "name reserved") return problem(422, NAME_RESERVED);
   if (yours === "agent's name") return problem(422, agentsName(rest.name!));
+  if (yours === "blocked words") return problem(422, BLOCKED_WORDS_REFUSED);
+  if (yours === "username taken") return problem(422, USERNAME_TAKEN);
   if (yours === "password needed") return problem(422, currentPassword ? CURRENT_PASSWORD_WRONG : CURRENT_PASSWORD_NEEDED);
-  return profileAnswer(yours, env);
+  return profileAnswer(yours, env, memberfulSite);
 }
 
 /**
- * Connect Memberful on your profile: once your password checks out, while you have one, so that holding
- * your session isn't enough to add a way into your account, as for changing your email address or
- * password, answers where to sign in at the Memberful site to connect your account there to yours, with
- * the cookie that keeps the state it goes with, to come back to your profile. 401 without a valid
- * session; 403 while Memberful isn't members only, or the deployment lacks its keys, or to a guest; 409
- * once you've connected one; 422 without your password, or with one that isn't yours; and 429 past
- * sign-in's limit, which checking the password counts against.
+ * Delete my account, on your profile: once you've said you mean it, with your password while you have
+ * one, which checking counts against sign-in's limit, or else by typing your name, deletes your account,
+ * as `Workspace.deleteAccount` does, and signs this browser out. 401 without a valid session; 409 for the
+ * only administrator; 422 without your password, or your name, or with one that isn't yours; and 429
+ * past sign-in's limit.
  */
-async function connectMemberful(request: Request, env: Env): Promise<Response> {
+async function deleteAccount(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
   if (!credentials) return problem(401, "Not signed in");
-  const site = memberfulKeysOf(env)?.site;
-  if (!site) return problem(403, MEMBERFUL_SIGN_IN_PROBLEMS.unavailable);
-  const body: unknown = await jsonBodyOf(request);
-  const { currentPassword } = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
-  const check = await workspace(env).memberfulConnectionCheck(credentials, request.headers.get("CF-Connecting-IP") ?? "unknown", site);
+  const deletion = parseAccountDeletion(await jsonBodyOf(request));
+  if (typeof deletion === "string") return problem(422, deletion);
+  const { currentPassword, name } = deletion;
+  const check = await workspace(env).accountDeletionCheck(credentials, request.headers.get("CF-Connecting-IP") ?? "unknown");
   if (!check) return problem(401, "Not signed in");
   if (check === "limited") return problem(429, SIGN_IN_LIMITED);
-  if (check === "unneeded") return problem(403, MEMBERFUL_SIGN_IN_PROBLEMS.unneeded);
-  if (check === "forbidden") return problem(403, "Guests can't connect Memberful");
-  if (check === "connected") return problem(409, "You've connected Memberful already");
-  if (check.passwordDigest !== "") {
-    if (typeof currentPassword !== "string" || !currentPassword) return problem(422, MEMBERFUL_PASSWORD_NEEDED);
+  if (check === "only administrator") return problem(409, ONLY_ADMINISTRATOR);
+  if (check.passwordDigest !== null) {
+    if (!currentPassword) return problem(422, DELETION_PASSWORD_NEEDED);
     // One longer than the form takes is nobody's, as at sign-in.
     if (isPasswordTooLong(currentPassword) || !(await passwordHasher(env).verify(currentPassword, check.passwordDigest)).matches) return problem(422, CURRENT_PASSWORD_WRONG);
   }
-  const connecting = await memberfulConnectionFor(request, env, check.userId, check.passwordDigest, PROFILE_PATH);
-  // Something changed meanwhile: their password, the setting, or what they've connected.
-  return connecting ? connectionAnswer(connecting) : problem(409, "Connecting Memberful didn't start. Try again.");
+  const deleted = await workspace(env).deleteAccount(credentials, check.passwordDigest, name);
+  if (!deleted) return problem(401, "Not signed in");
+  if (deleted === "password needed") return problem(422, currentPassword ? CURRENT_PASSWORD_WRONG : DELETION_PASSWORD_NEEDED);
+  if (deleted === "name needed") return problem(422, DELETION_NAME_NEEDED);
+  if (deleted === "only administrator") return problem(409, ONLY_ADMINISTRATOR);
+  return new Response(null, { status: 204, headers: { "Set-Cookie": expiredSessionCookie(request) } });
 }
 
 /**
- * Disconnect Memberful on your profile: once your password checks out, so that holding your session isn't
- * enough to change how you sign in, as for connecting one, unlinks your account from the one at the
- * Memberful site, ends your other sessions and forgets their browsers' push subscriptions, as a new
- * password does, keeping this browser's at `pushSubscriptionEndpoint`, and answers your profile as it
- * is then. 401 without a valid session; 403 to a guest, or while the deployment lacks Memberful's keys;
+ * What connecting an account elsewhere from your profile, and disconnecting it, goes by: Memberful, at
+ * the site Ember has the keys of, or the single sign-on provider, what each is called, and what's said
+ * when it doesn't work.
+ */
+interface ConnectingElsewhere {
+  via: SignInElsewhere;
+  name: string;
+  /** Where accounts there are linked from, or null while there's nowhere to connect one. */
+  issuerOf: (env: Env) => Promise<string | null>;
+  connectionFor: typeof memberfulConnectionFor | typeof ssoConnectionFor;
+  unavailable: string;
+  unneeded: string;
+  passwordNeeded: string;
+  /** Why it's refused to someone without a password whom the other way signs in. */
+  signsInOtherwise: string;
+  notConnected: string;
+  disconnectPasswordNeeded: string;
+  disconnectWithoutPassword: string;
+  disconnectWithoutEmail: string;
+}
+
+const CONNECTING_MEMBERFUL: ConnectingElsewhere = {
+  via: "memberful",
+  name: "Memberful",
+  issuerOf: memberfulSiteFor,
+  connectionFor: memberfulConnectionFor,
+  unavailable: MEMBERFUL_SIGN_IN_PROBLEMS.unavailable,
+  unneeded: MEMBERFUL_SIGN_IN_PROBLEMS.unneeded,
+  passwordNeeded: MEMBERFUL_PASSWORD_NEEDED,
+  signsInOtherwise: MEMBERFUL_WITH_SSO,
+  notConnected: MEMBERFUL_NOT_CONNECTED,
+  disconnectPasswordNeeded: MEMBERFUL_DISCONNECT_PASSWORD_NEEDED,
+  disconnectWithoutPassword: MEMBERFUL_DISCONNECT_WITHOUT_PASSWORD,
+  disconnectWithoutEmail: MEMBERFUL_DISCONNECT_WITHOUT_EMAIL,
+};
+
+const CONNECTING_SSO: ConnectingElsewhere = {
+  via: "sso",
+  name: "single sign-on",
+  issuerOf: async (env) => (await workspace(env).ssoProvider())?.issuer ?? null,
+  connectionFor: ssoConnectionFor,
+  unavailable: SSO_SIGN_IN_PROBLEMS.unavailable,
+  unneeded: SSO_SIGN_IN_PROBLEMS.unneeded,
+  passwordNeeded: SSO_PASSWORD_NEEDED,
+  signsInOtherwise: SSO_WITH_MEMBERFUL,
+  notConnected: SSO_NOT_CONNECTED,
+  disconnectPasswordNeeded: SSO_DISCONNECT_PASSWORD_NEEDED,
+  disconnectWithoutPassword: SSO_DISCONNECT_WITHOUT_PASSWORD,
+  disconnectWithoutEmail: SSO_DISCONNECT_WITHOUT_EMAIL,
+};
+
+/**
+ * Connect Memberful, or single sign-on, on your profile: once your password checks out, while you have
+ * one, so that holding your session isn't enough to add a way into your account, as for changing your
+ * email address or password, answers where to sign in there to connect your account there to yours,
+ * with the cookie that keeps the state it goes with, to come back to your profile. 401 without a valid
+ * session; 403 while it isn't the only way in, or there's nowhere to connect one (Ember lacks
+ * Memberful's keys, or no provider is set up), to a guest, or to someone without a password whom the
+ * other way signs in, which holding their session would be enough to add a way in to; 409 once you've
+ * connected one; 422 without your password, or with one that isn't yours; and 429 past sign-in's limit,
+ * which checking the password counts against.
+ */
+async function connectElsewhere(request: Request, env: Env, elsewhere: ConnectingElsewhere): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const issuer = await elsewhere.issuerOf(env);
+  if (!issuer) return problem(403, elsewhere.unavailable);
+  const body: unknown = await jsonBodyOf(request);
+  const { currentPassword } = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  const check = await workspace(env).connectionCheck(elsewhere.via, credentials, request.headers.get("CF-Connecting-IP") ?? "unknown", issuer, await memberfulSiteFor(env));
+  if (!check) return problem(401, "Not signed in");
+  if (check === "limited") return problem(429, SIGN_IN_LIMITED);
+  if (check === "unneeded") return problem(403, elsewhere.unneeded);
+  if (check === "forbidden") return problem(403, `Guests can't connect ${elsewhere.name}`);
+  if (check === "otherwise") return problem(403, elsewhere.signsInOtherwise);
+  if (check === "connected") return problem(409, `You've connected ${elsewhere.name} already`);
+  if (check.passwordDigest !== "") {
+    if (typeof currentPassword !== "string" || !currentPassword) return problem(422, elsewhere.passwordNeeded);
+    // One longer than the form takes is nobody's, as at sign-in.
+    if (isPasswordTooLong(currentPassword) || !(await passwordHasher(env).verify(currentPassword, check.passwordDigest)).matches) return problem(422, CURRENT_PASSWORD_WRONG);
+  }
+  const connecting = await elsewhere.connectionFor(request, env, check.userId, check.passwordDigest, PROFILE_PATH);
+  // Something changed meanwhile: their password, the setting, or what they've connected.
+  return connecting ? connectionAnswer({ connection: connecting.connection, cookies: connecting.cookie === null ? [] : [connecting.cookie] }) : problem(409, `Connecting ${elsewhere.name} didn't start. Try again.`);
+}
+
+/**
+ * Disconnect Memberful, or single sign-on, on your profile: once your password checks out, so that
+ * holding your session isn't enough to change how you sign in, as for connecting one, unlinks your
+ * account from the one there, ends your other sessions and forgets their browsers' push subscriptions,
+ * as a new password does, keeping this browser's at `pushSubscriptionEndpoint`, and answers your profile
+ * as it is then. 401 without a valid session; 403 to a guest, or while there's nowhere to connect one;
  * 404 while you haven't connected one; 422 while you have no password, or no email address, to sign in
  * with once it's disconnected, or without your password, or with one that isn't yours; 429 past
  * sign-in's limit, which checking the password counts against; and 409 when your password, email
  * address or connection changed meanwhile.
  */
-async function disconnectMemberful(request: Request, env: Env): Promise<Response> {
+async function disconnectElsewhere(request: Request, env: Env, elsewhere: ConnectingElsewhere): Promise<Response> {
   const credentials = await credentialsOf(request, env);
   if (!credentials) return problem(401, "Not signed in");
-  const site = memberfulKeysOf(env)?.site;
-  if (!site) return problem(403, MEMBERFUL_SIGN_IN_PROBLEMS.unavailable);
+  const issuer = await elsewhere.issuerOf(env);
+  if (!issuer) return problem(403, elsewhere.unavailable);
   const disconnection = parseMemberfulDisconnection(await jsonBodyOf(request));
   if (typeof disconnection === "string") return problem(422, disconnection);
   const { currentPassword, pushSubscriptionEndpoint } = disconnection;
-  const check = await workspace(env).memberfulDisconnectionCheck(credentials, request.headers.get("CF-Connecting-IP") ?? "unknown", site);
+  const check = await workspace(env).disconnectionCheck(credentials, request.headers.get("CF-Connecting-IP") ?? "unknown", issuer);
   if (!check) return problem(401, "Not signed in");
   if (check === "limited") return problem(429, SIGN_IN_LIMITED);
-  if (check === "forbidden") return problem(403, "Guests can't disconnect Memberful");
-  if (check === "not connected") return problem(404, MEMBERFUL_NOT_CONNECTED);
-  if (check === "no password") return problem(422, MEMBERFUL_DISCONNECT_WITHOUT_PASSWORD);
-  if (check === "no email address") return problem(422, MEMBERFUL_DISCONNECT_WITHOUT_EMAIL);
-  if (!currentPassword) return problem(422, MEMBERFUL_DISCONNECT_PASSWORD_NEEDED);
+  if (check === "forbidden") return problem(403, `Guests can't disconnect ${elsewhere.name}`);
+  if (check === "not connected") return problem(404, elsewhere.notConnected);
+  if (check === "no password") return problem(422, elsewhere.disconnectWithoutPassword);
+  if (check === "no email address") return problem(422, elsewhere.disconnectWithoutEmail);
+  if (!currentPassword) return problem(422, elsewhere.disconnectPasswordNeeded);
   // One longer than the form takes is nobody's, as at sign-in.
   if (isPasswordTooLong(currentPassword) || !(await passwordHasher(env).verify(currentPassword, check.passwordDigest)).matches) return problem(422, CURRENT_PASSWORD_WRONG);
-  const yours = await workspace(env).disconnectMemberful(credentials, site, check.passwordDigest, pushSubscriptionEndpoint || null);
+  const yours = await workspace(env).disconnectElsewhere(credentials, issuer, check.passwordDigest, pushSubscriptionEndpoint || null);
   if (!yours) return problem(401, "Not signed in");
   // Something changed meanwhile: their password, or what they've connected.
-  if (yours === "refused") return problem(409, "Disconnecting Memberful didn't work. Try again.");
-  return profileAnswer(yours, env);
+  if (yours === "refused") return problem(409, `Disconnecting ${elsewhere.name} didn't work. Try again.`);
+  return profileAnswer(yours, env, await memberfulSiteFor(env));
+}
+
+const connectMemberful = (request: Request, env: Env) => connectElsewhere(request, env, CONNECTING_MEMBERFUL);
+const disconnectMemberful = (request: Request, env: Env) => disconnectElsewhere(request, env, CONNECTING_MEMBERFUL);
+const connectSso = (request: Request, env: Env) => connectElsewhere(request, env, CONNECTING_SSO);
+const disconnectSso = (request: Request, env: Env) => disconnectElsewhere(request, env, CONNECTING_SSO);
+
+/**
+ * Sends the browser on to sign in at the Memberful site, or the single sign-on provider, to connect an
+ * account there, with the cookie that keeps the state it goes with, or on to Ember's custom domain to
+ * connect from there, which no cache should keep.
+ */
+function connectionAnswer({ connection, cookies }: { connection: ElsewhereConnection; cookies: string[] }): Response {
+  const answer = json(connection, { status: 202, headers: { "Cache-Control": "no-store" } });
+  for (const cookie of cookies) answer.headers.append("Set-Cookie", cookie);
+  return answer;
 }
 
 /**
- * Sends the browser on to sign in at the Memberful site to connect an account there, with the cookie that
- * keeps the state it goes with, or on to Ember's custom domain to connect from there, which no cache should keep.
+ * Starts connecting the account of `userId`, whose password checked out against `passwordDigest`, by
+ * `way`, as signing in with a password does while people sign in only elsewhere: at Memberful, at the
+ * provider, or at both while either signs people in, when whichever starts is offered. Null when none does.
  */
-const connectionAnswer = ({ connection, cookie }: { connection: MemberfulConnection; cookie: string | null }) =>
-  json(connection, { status: 202, headers: { ...(cookie === null ? {} : { "Set-Cookie": cookie }), "Cache-Control": "no-store" } });
+async function connectionsFor(request: Request, env: Env, way: OnlyWay, userId: UserId, passwordDigest: string, returnTo: unknown) {
+  const [memberful, sso] = await Promise.all([
+    way === "sso" ? null : memberfulConnectionFor(request, env, userId, passwordDigest, returnTo),
+    way === "memberful" ? null : ssoConnectionFor(request, env, userId, passwordDigest, returnTo),
+  ]);
+  if (!memberful && !sso) return null;
+  const connection = { ...memberful?.connection, ...sso?.connection } as ElsewhereConnection;
+  return { connection, cookies: [memberful?.cookie, sso?.cookie].filter((cookie): cookie is string => typeof cookie === "string") };
+}
 
 /**
  * Gives you the avatar the form brings, answering your profile then. Who's asking is checked before the
@@ -746,14 +1047,14 @@ async function changeAvatar(request: Request, env: Env): Promise<Response> {
   const avatar = await storeAvatar(env, env.FILES, form);
   if ("error" in avatar) return problem(avatar.status, avatar.error);
   const yours = await workspace(env).changeAvatar(credentials, avatar);
-  return yours ? profileAnswer(yours, env) : problem(401, "Not signed in");
+  return yours ? profileAnswer(yours, env, await memberfulSiteFor(env)) : problem(401, "Not signed in");
 }
 
 /** Takes your avatar away, answering your profile then. */
 async function removeAvatar(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
   const yours = credentials && (await workspace(env).changeAvatar(credentials, null));
-  return yours ? profileAnswer(yours, env) : problem(401, "Not signed in");
+  return yours ? profileAnswer(yours, env, await memberfulSiteFor(env)) : problem(401, "Not signed in");
 }
 
 /**
@@ -787,8 +1088,60 @@ async function dismissInvitation(request: Request, env: Env): Promise<Response> 
 }
 
 /**
+ * Stops an invitation into room `roomId`'s huddle ringing in every tab of the signed-in person's, as
+ * joining from it or declining it in one of them does, answering 204. Nothing is kept of an invitation,
+ * so it answers the same for a room with none.
+ */
+async function answerHuddleInvitation(request: Request, env: Env, roomId: RoomId): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  const answered = credentials !== null && (await workspace(env).answerHuddleInvitation(credentials, roomId));
+  return answered ? new Response(null, { status: 204 }) : problem(401, "Not signed in");
+}
+
+/**
+ * `PATCH /api/users/me/huddle-sounds`, `{ music?, chimes?, ring? }`: turns a huddle's music, its sounds
+ * of someone joining and leaving, or an invitation's ring on or off for the signed-in person, as the
+ * switches on their profile do, one it leaves out staying as it is, answering which they hear then:
+ * 422 for one that's neither true nor false.
+ */
+async function changeHuddleSounds(request: Request, env: Env): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const changes = parseHuddleSoundChanges(await jsonBodyOf(request));
+  if (typeof changes === "string") return problem(422, changes);
+  const sounds = await workspace(env).setHuddleSounds(credentials, changes);
+  return sounds ? json({ sounds } satisfies HuddleSoundsChanged) : problem(401, "Not signed in");
+}
+
+/**
+ * `PUT /api/users/me/notifications-pause`, `{ until }`: pauses the signed-in person's notifications until
+ * `until`, an ISO time no more than a week on, or resumes them with null, as the rail's Pause
+ * notifications does, answering them as the people directory lists them then: 422 for a time that has
+ * passed or isn't one.
+ */
+async function pauseNotifications(request: Request, env: Env): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const pause = parseNotificationsPause(await jsonBodyOf(request), Date.now());
+  if (typeof pause === "string") return problem(422, pause);
+  const user = await workspace(env).pauseNotifications(credentials, pause.until);
+  return user ? json({ user } satisfies NotificationsPaused) : problem(401, "Not signed in");
+}
+
+/**
+ * `GET /api/huddles`: the huddles that are over in the rooms the signed-in person is in and hasn't
+ * hidden, the latest to have started first, which the Huddles page lists.
+ */
+async function pastHuddles(request: Request, env: Env): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  const huddles = credentials && (await workspace(env).pastHuddles(credentials));
+  return huddles ? json({ huddles } satisfies PastHuddles) : problem(401, "Not signed in");
+}
+
+/**
  * Everyone in the workspace, deactivated and banned people too, with their avatars' addresses, for
- * the app to show people by. No cache keeps it, as none keeps the sidebar, so the app keeps its own copy.
+ * the app to show people by, but the AI agents only administrators' direct messages reach, which only
+ * an administrator is listed. No cache keeps it, as none keeps the sidebar, so the app keeps its own copy.
  */
 async function directory(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
@@ -808,7 +1161,8 @@ function segmentText(segment: string): string {
 
 /**
  * Someone's page: anyone, whatever their status, with their email address and a new sign-in link for
- * administrators, and what an agent's page tells everyone of it. An id nobody has is 404.
+ * administrators, and what an agent's page tells everyone of it. An id nobody has is 404, as is an AI
+ * agent's only administrators' direct messages reach, to anyone else.
  */
 async function showPerson(request: Request, env: Env, userId: UserId): Promise<Response> {
   const credentials = await credentialsOf(request, env);
@@ -816,7 +1170,7 @@ async function showPerson(request: Request, env: Env, userId: UserId): Promise<R
   if (!found) return problem(401, "Not signed in");
   if (found === "not found") return problem(404, "Not found");
   const [shown] = await directoryOf([found.person], env.SESSION_SECRET);
-  const transferId = found.transfer ? await newTransferId(found.transfer, env.SESSION_SECRET, Date.now()) : undefined;
+  const transferId = found.transfer ? await newTransferId(found.transfer, env.SESSION_SECRET) : undefined;
   return json({ person: shown!, transferId, ...(found.agent && { agent: found.agent }) } satisfies PersonAnswer, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -833,7 +1187,8 @@ async function personPage(request: Request, env: Env, pathname: string, userId: 
 /**
  * Whom the mentions prompt offers: the first 20 by name of the active people in `room_id`, or anywhere
  * without one, whose names contain `filter` (or `query`), as `<lexxy-prompt-item>`s, with the AI agents'
- * badged, @ember's among them. A room someone isn't in is 404.
+ * badged, @ember's among them, and with `special_mentions=1`, as a room's own composer asks, the special
+ * mentions that notify the room whose names start with it (`promptItems`). A room someone isn't in is 404.
  */
 async function mentionable(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
@@ -842,11 +1197,23 @@ async function mentionable(request: Request, env: Env): Promise<Response> {
   const roomId = present(params.get("room_id"));
   if (roomId !== undefined && !isRoomId(roomId)) return problem(404, ROOM_NOT_FOUND);
   const query = present(params.get("filter")) ?? present(params.get("query")) ?? "";
-  const people = await workspace(env).mentionable(credentials, roomId ?? null, query);
-  if (!people) return problem(401, "Not signed in");
-  if (people === "not found") return problem(404, ROOM_NOT_FOUND);
-  const items = (await directoryOf(people, env.SESSION_SECRET)).map((person) => mentionPromptItem(person));
+  const found = await workspace(env).mentionable(credentials, roomId ?? null, query, params.get("special_mentions") === "1");
+  if (!found) return problem(401, "Not signed in");
+  if (found === "not found") return problem(404, ROOM_NOT_FOUND);
+  const people = (await directoryOf(found.people, env.SESSION_SECRET)).map((person) => mentionPromptItem(person));
+  const items = promptItems(people, found.specialMentions, query);
   return new Response(items.join(""), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
+/**
+ * The mentions prompt's items: the people's, then the special mentions', but for a special mention named
+ * all that's been typed, which comes first, so that typing @here and a space picks it, as Slack's prompt
+ * does, while @c picks someone called Chris.
+ */
+function promptItems(people: string[], specialMentions: SpecialMention[], query: string): string[] {
+  const typed = (mention: SpecialMention) => mention === query.toLowerCase();
+  const items = (mentions: SpecialMention[]) => mentions.map(specialMentionPromptItem);
+  return [...items(specialMentions.filter(typed)), ...people, ...items(specialMentions.filter((mention) => !typed(mention)))];
 }
 
 /** A parameter's value unless it's blank, as Rails' `presence` reads it. */
@@ -870,12 +1237,85 @@ async function createRoom(request: Request, env: Env): Promise<Response> {
   }
   const created = await workspace(env).createRoom(credentials, room);
   if (!created) return problem(401, "Not signed in");
-  return created === "forbidden" ? problem(403, ROOM_CREATION_FORBIDDEN) : json({ room: created }, { status: 201 });
+  if (created === "blocked words") return problem(422, BLOCKED_WORDS_REFUSED);
+  if (created === "forbidden") return problem(403, ROOM_CREATION_FORBIDDEN);
+  return typeof created === "string" ? sectionRefused(created) : json({ room: created }, { status: 201 });
+}
+
+/** What someone hears when they can't make, rename or delete sections. */
+const SECTIONS_FORBIDDEN = "Only administrators can make, rename and delete sections";
+const SECTION_NOT_FOUND = "Section not found";
+const SECTION_NAME_TAKEN = "There's a section with that name already";
+const TOO_MANY_SECTIONS = `There can be at most ${MAX_SECTIONS} sections`;
+
+/** What New room and a room's settings hear when the section they choose for it is refused. */
+function sectionRefused(refusal: SectionRefusal): Response {
+  switch (refusal) {
+    case "no such section":
+      return problem(422, SECTION_NOT_FOUND);
+    case "new sections administrators only":
+      return problem(403, SECTIONS_FORBIDDEN);
+    case "too many sections":
+      return problem(422, TOO_MANY_SECTIONS);
+    case "blocked words":
+      return problem(422, BLOCKED_WORDS_REFUSED);
+  }
+}
+
+/**
+ * The answer to a section's name that doesn't parse: 422, or 403 for anyone but an administrator, who
+ * hears so before the name is checked.
+ */
+async function sectionNameRefused(env: Env, credentials: Credentials, refusal: string): Promise<Response> {
+  const administrator = await workspace(env).canAdminister(credentials);
+  if (administrator === null) return problem(401, "Not signed in");
+  return administrator ? problem(422, refusal) : problem(403, SECTIONS_FORBIDDEN);
+}
+
+/** Makes a section, after the others, as New section in Rooms and permissions does, answering 201 with it. */
+async function makeSection(request: Request, env: Env): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const named = parseSectionName(await jsonBodyOf(request));
+  if (typeof named === "string") return sectionNameRefused(env, credentials, named);
+  const section = await workspace(env).makeSection(credentials, named.name);
+  if (!section) return problem(401, "Not signed in");
+  if (section === "forbidden") return problem(403, SECTIONS_FORBIDDEN);
+  if (section === "taken") return problem(409, SECTION_NAME_TAKEN);
+  if (section === "too many sections") return problem(422, TOO_MANY_SECTIONS);
+  if (section === "blocked words") return problem(422, BLOCKED_WORDS_REFUSED);
+  return json({ section } satisfies { section: Section }, { status: 201 });
+}
+
+/** Renames a section, as its Rename in Rooms and permissions does, answering it. */
+async function renameSection(request: Request, env: Env, id: SectionId): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const named = parseSectionName(await jsonBodyOf(request));
+  if (typeof named === "string") return sectionNameRefused(env, credentials, named);
+  const section = await workspace(env).renameSection(credentials, id, named.name);
+  if (!section) return problem(401, "Not signed in");
+  if (section === "forbidden") return problem(403, SECTIONS_FORBIDDEN);
+  if (section === "not found") return problem(404, SECTION_NOT_FOUND);
+  if (section === "taken") return problem(409, SECTION_NAME_TAKEN);
+  if (section === "blocked words") return problem(422, BLOCKED_WORDS_REFUSED);
+  return json({ section } satisfies { section: Section });
+}
+
+/** Deletes a section, as its Delete in Rooms and permissions does, leaving its rooms in none, answering 204. */
+async function deleteSection(request: Request, env: Env, id: SectionId): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  const deleted = credentials && (await workspace(env).deleteSection(credentials, id));
+  if (!deleted) return problem(401, "Not signed in");
+  if (deleted === "forbidden") return problem(403, SECTIONS_FORBIDDEN);
+  if (deleted === "not found") return problem(404, SECTION_NOT_FOUND);
+  return new Response(null, { status: 204 });
 }
 
 /**
  * Starts a DM with the people it names, or opens the one they have, as New direct message does: 201 for
- * a new DM and 200 for one they had.
+ * a new DM and 200 for one they had, or 403 for a new one with someone who has blocked you, which says
+ * only that they aren't taking direct messages.
  */
 async function startDirect(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
@@ -883,7 +1323,9 @@ async function startDirect(request: Request, env: Env): Promise<Response> {
   const direct = parseNewDirect(await jsonBodyOf(request));
   if (typeof direct === "string") return problem(422, direct);
   const started = await workspace(env).startDirect(credentials, direct.userIds);
-  return started ? json({ room: started.room } satisfies StartedDirect, { status: started.started ? 201 : 200 }) : problem(401, "Not signed in");
+  if (!started) return problem(401, "Not signed in");
+  if ("refusedBy" in started) return problem(403, notTakingDirects(started.refusedBy));
+  return json({ room: started.room } satisfies StartedDirect, { status: started.started ? 201 : 200 });
 }
 
 /** Who New room's forms list: everyone active, by name, for anyone who may create rooms. */
@@ -892,6 +1334,14 @@ async function newRoomForm(request: Request, env: Env): Promise<Response> {
   const form = credentials && (await workspace(env).newRoomForm(credentials));
   if (!form) return problem(401, "Not signed in");
   return form === "forbidden" ? problem(403, ROOM_CREATION_FORBIDDEN) : json(form satisfies NewRoomForm);
+}
+
+/** How many people a room holds, and how many each special mention the asker may use would notify there, for its members. */
+async function notified(request: Request, env: Env, roomId: RoomId): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  const counts = credentials && (await workspace(env).notified(credentials, roomId));
+  if (!counts) return problem(401, "Not signed in");
+  return counts === "not found" ? problem(404, ROOM_NOT_FOUND) : json(counts satisfies NotifiedCounts);
 }
 
 /** A room's settings page, for its members, read-only for those who can't change it. */
@@ -904,7 +1354,8 @@ async function roomSettings(request: Request, env: Env, roomId: RoomId): Promise
 
 /**
  * Changes a room, as its settings page saves it. Someone who can't change it hears so before anything
- * they sent is checked.
+ * they sent is checked, and whoever would turn huddles, or @channel, @here and @everyone, on or off in it
+ * hears that only an administrator can, unless they're one.
  */
 async function changeRoom(request: Request, env: Env, roomId: RoomId): Promise<Response> {
   const credentials = await credentialsOf(request, env);
@@ -915,7 +1366,29 @@ async function changeRoom(request: Request, env: Env, roomId: RoomId): Promise<R
   if (!room) return problem(401, "Not signed in");
   if (room === "not found") return problem(404, ROOM_NOT_FOUND);
   if (room === "forbidden") return problem(403, "Only administrators and the room's creator can change it");
+  if (room === "administrators only") return problem(403, "Only administrators can turn huddles on or off in a room");
+  if (room === "mentions administrators only") return problem(403, "Only administrators can turn @channel, @here and @everyone on or off in a room");
+  if (room === "blocked words") return problem(422, BLOCKED_WORDS_REFUSED);
+  if (typeof room === "string") return sectionRefused(room);
   return typeof changes === "string" ? problem(422, changes) : json({ room });
+}
+
+/**
+ * Puts people in a private room, or takes them out, as /invite and /remove do, leaving everyone else as
+ * they are. As with changing a room, someone who can't change it hears so before anything they sent is
+ * checked.
+ */
+async function changeMembers(request: Request, env: Env, roomId: RoomId): Promise<Response> {
+  const credentials = await credentialsOf(request, env);
+  if (!credentials) return problem(401, "Not signed in");
+  const change = parseMembersChange(await jsonBodyOf(request));
+  // A change that doesn't parse changes nothing, but the room is still checked first.
+  const room = await workspace(env).changeMembers(credentials, roomId, typeof change === "string" ? { addedIds: [], removedIds: [] } : change);
+  if (!room) return problem(401, "Not signed in");
+  if (room === "not found") return problem(404, ROOM_NOT_FOUND);
+  if (room === "forbidden") return problem(403, "Only administrators and the room's creator can change it");
+  if (room === "open") return problem(409, "Everyone is in an open room, so nobody can be put in it or taken out");
+  return typeof change === "string" ? problem(422, change) : json({ room });
 }
 
 /**
@@ -1000,23 +1473,23 @@ const SHARED_ORDER_FORBIDDEN = "Only administrators can put rooms in order for e
 
 /**
  * Puts the rooms in the signed-in administrator's sidebar in the shared order, as saving it on workspace
- * settings does, answering the rooms they're in that it ranks: 400 for a list it can't read, and 403 for
- * anyone but an administrator, or a list naming a room outside their sidebar. An empty list clears the
- * order.
+ * settings does, and the sections in order, with their rooms, when it sends them, answering the rooms
+ * they're in that the order ranks and every section: 400 for a layout it can't read, and 403 for anyone
+ * but an administrator, or a list naming a room outside their sidebar. An empty list clears the order.
  */
 async function setSharedOrder(request: Request, env: Env): Promise<Response> {
   const credentials = await credentialsOf(request, env);
   if (!credentials) return problem(401, "Not signed in");
-  const roomIds = parseSharedOrder(await jsonBodyOf(request));
+  const layout = parseRoomLayout(await jsonBodyOf(request));
   // Someone who isn't an administrator hears so before the list is checked.
-  if (typeof roomIds === "string") {
+  if (typeof layout === "string") {
     const administrator = await workspace(env).canAdminister(credentials);
     if (administrator === null) return problem(401, "Not signed in");
-    return administrator ? problem(400, roomIds) : problem(403, SHARED_ORDER_FORBIDDEN);
+    return administrator ? problem(400, layout) : problem(403, SHARED_ORDER_FORBIDDEN);
   }
-  const sharedOrder = await workspace(env).setSharedOrder(credentials, roomIds);
-  if (!sharedOrder) return problem(401, "Not signed in");
-  return sharedOrder === "forbidden" ? problem(403, SHARED_ORDER_FORBIDDEN) : json({ sharedOrder } satisfies { sharedOrder: RoomId[] });
+  const saved = await workspace(env).setSharedOrder(credentials, layout);
+  if (!saved) return problem(401, "Not signed in");
+  return saved === "forbidden" ? problem(403, SHARED_ORDER_FORBIDDEN) : json(saved satisfies SavedRoomLayout);
 }
 
 /** A tab's workspace socket, which the Workspace lets in itself, as the session the request's cookie names. */
@@ -1053,9 +1526,8 @@ async function connectToRoom(request: Request, env: Env, roomId: RoomId, huddle 
   headers.set(BANNED_HEADER, String(access.banned));
   // Set either way, so that only the address a socket asks at says which it is.
   headers.set(HUDDLE_HEADER, String(huddle));
-  // An address longer than any IP address isn't one a ban can hold, and would make too long a tag.
-  const { ip } = clientOf(request);
-  if (ip !== null && ip.length <= MAX_ADDRESS_LENGTH) headers.set(ADDRESS_HEADER, ip);
+  const address = taggedAddress(clientOf(request).ip);
+  if (address !== null) headers.set(ADDRESS_HEADER, address);
   else headers.delete(ADDRESS_HEADER);
   return env.CHAT_ROOM.getByName(roomId).fetch(new Request(request, { headers }));
 }
@@ -1078,10 +1550,11 @@ function apiAction(request: Request, env: Env, pathname: string): (() => Respons
   if (pathname === "/api/account/sending_domain_checks" && request.method === "POST") return () => checkSendingDomain(request, env);
   if (pathname === "/api/account/turnstile_keys" && request.method === "PUT") return () => saveTurnstileKeys(request, env);
   if (pathname === "/api/account/turnstile_keys" && request.method === "DELETE") return () => forgetTurnstileKeys(request, env);
+  if (pathname === "/api/account/memberful_keys" && request.method === "PUT") return () => saveMemberfulKeys(request, env);
   if (pathname === "/api/account/assistant" && request.method === "PUT") return () => saveAssistant(request, env);
   if (pathname === "/api/account/assistant" && request.method === "DELETE") return () => forgetAssistant(request, env);
   if (pathname === "/api/account/assistant" && request.method === "PATCH") return () => changeAssistantSettings(request, env);
-  if (pathname === "/api/account/assistant/catalog" && request.method === "POST") return () => listAssistantModels(request, env);
+  if (pathname === "/api/account/assistant/offered" && request.method === "POST") return () => listOfferedModels(request, env);
   if (pathname === "/api/account/assistant/models" && request.method === "POST") return () => addAssistantModel(request, env);
   if (pathname === "/api/account/assistant/models" && request.method === "DELETE") return () => removeAssistantModel(request, env);
   if (pathname === "/api/account/assistant/web_search" && request.method === "PUT") return () => changeWebSearch(request, env);
@@ -1099,8 +1572,28 @@ function apiAction(request: Request, env: Env, pathname: string): (() => Respons
   if (agentAvatar && request.method === "DELETE") return () => removeAgentAvatar(request, env, agentAvatar[1]!);
   const agentTrials = pathname.match(/^\/api\/account\/agents\/([^/]+)\/trials$/);
   if (agentTrials && request.method === "POST") return () => tryAgent(request, env, agentTrials[1]!);
+  const agentTools = pathname.match(/^\/api\/account\/agents\/([^/]+)\/tools$/);
+  if (agentTools && request.method === "GET") return () => showAgentTools(request, env, agentTools[1]!);
+  if (agentTools && request.method === "PUT") return () => pickAgentTools(request, env, agentTools[1]!);
+  if (pathname === "/api/account/apps" && request.method === "GET") return () => listApps(request, env);
+  if (pathname === "/api/account/apps" && request.method === "POST") return () => connectApp(request, env);
+  const app = pathname.match(/^\/api\/account\/apps\/([^/]+)$/);
+  if (app && request.method === "GET") return () => showApp(request, env, app[1]!);
+  if (app && request.method === "PATCH") return () => changeApp(request, env, app[1]!);
+  if (app && request.method === "DELETE") return () => disconnectApp(request, env, app[1]!);
+  if (pathname === "/api/account/app-sign-ins" && request.method === "POST") return () => beginNewAppSignIn(request, env);
+  if (pathname === "/api/account/app-sign-ins/finish" && request.method === "POST") return () => finishAppSignIn(request, env);
+  const appSignIn = pathname.match(/^\/api\/account\/apps\/([^/]+)\/sign-in$/);
+  if (appSignIn && request.method === "POST") return () => beginAppSignIn(request, env, appSignIn[1]!);
+  const appTools = pathname.match(/^\/api\/account\/apps\/([^/]+)\/tools$/);
+  if (appTools && request.method === "POST") return () => readAppTools(request, env, appTools[1]!);
+  if (pathname === "/api/account/outside_ai" && request.method === "PUT") return () => changeOutsideAi(request, env);
   if (pathname === "/api/account/huddles" && request.method === "PUT") return () => saveHuddles(request, env);
   if (pathname === "/api/account/huddles" && request.method === "DELETE") return () => forgetHuddles(request, env);
+  if (pathname === "/api/account/huddles/relay" && request.method === "PUT") return () => saveHuddleRelay(request, env);
+  if (pathname === "/api/account/huddles/relay" && request.method === "DELETE") return () => forgetHuddleRelay(request, env);
+  if (pathname === SSO_SETTINGS_PATH && request.method === "PUT") return () => saveSso(request, env);
+  if (pathname === SSO_SETTINGS_PATH && request.method === "DELETE") return () => forgetSso(request, env);
   if (pathname === "/api/account/custom_domain_checks" && request.method === "POST") return () => checkCustomDomain(request, env);
   if (pathname === "/api/account/custom_domain_lookups" && request.method === "POST") return () => lookUpCustomDomain(request, env);
   if (pathname === LOGO_PATH && request.method === "PUT") return () => changeLogo(request, env);
@@ -1110,6 +1603,11 @@ function apiAction(request: Request, env: Env, pathname: string): (() => Respons
   if (pathname === "/api/account/custom_styles" && request.method === "GET") return () => customStyles(request, env);
   if (pathname === "/api/account/custom_styles" && request.method === "PATCH") return () => changeCustomStyles(request, env);
   if (pathname === "/api/account/room_order" && request.method === "PUT") return () => setSharedOrder(request, env);
+  if (pathname === "/api/account/sections" && request.method === "POST") return () => makeSection(request, env);
+  // A section's id never needs percent-encoding either, so an encoded segment names none.
+  const section = pathname.match(/^\/api\/account\/sections\/([^/]+)$/);
+  if (section && request.method === "PATCH") return () => (isSectionId(section[1]!) ? renameSection(request, env, section[1]!) : problem(404, SECTION_NOT_FOUND));
+  if (section && request.method === "DELETE") return () => (isSectionId(section[1]!) ? deleteSection(request, env, section[1]!) : problem(404, SECTION_NOT_FOUND));
   // The ids of people who can be active never need percent-encoding, so an encoded segment can't name one.
   const person = pathname.match(/^\/api\/account\/users\/([^/]+)$/);
   if (person && request.method === "PATCH") return () => changeRole(request, env, person[1]!);
@@ -1126,13 +1624,27 @@ function apiAction(request: Request, env: Env, pathname: string): (() => Respons
   if (pathname === "/api/sidebar" && request.method === "GET") return () => sidebar(request, env);
   if (pathname === "/api/sidebar/invitation" && request.method === "DELETE") return () => dismissInvitation(request, env);
   if (pathname === "/api/users" && request.method === "GET") return () => directory(request, env);
+  if (pathname === "/api/agents" && request.method === "GET") return () => listAvailableAgents(request, env);
   if (pathname === "/api/autocompletable/users" && request.method === "GET") return () => mentionable(request, env);
   if (pathname === "/api/sidebar/order" && request.method === "PUT") return () => setFavoriteOrder(request, env);
   if (pathname === "/api/users/me/profile" && request.method === "GET") return () => profile(request, env);
   if (pathname === "/api/users/me/profile" && request.method === "PATCH") return () => changeProfile(request, env);
+  if (pathname === "/api/users/me" && request.method === "DELETE") return () => deleteAccount(request, env);
   if (pathname === "/api/users/me/assistant" && request.method === "PATCH") return () => changeYourAssistant(request, env);
+  if (pathname === "/api/users/me/huddle-sounds" && request.method === "PATCH") return () => changeHuddleSounds(request, env);
+  if (pathname === "/api/users/me/notifications-pause" && request.method === "PUT") return () => pauseNotifications(request, env);
+  if (pathname === "/api/huddles" && request.method === "GET") return () => pastHuddles(request, env);
+  const ownAppSignIn = pathname.match(/^\/api\/users\/me\/apps\/([^/]+)\/sign-in$/);
+  if (ownAppSignIn && request.method === "POST") return () => beginOwnAppSignIn(request, env, ownAppSignIn[1]!);
+  if (ownAppSignIn && request.method === "DELETE") return () => signOutOfApp(request, env, ownAppSignIn[1]!);
+  const outsideConnection = pathname.match(/^\/api\/users\/me\/outside\/([^/]+)$/);
+  if (outsideConnection && request.method === "DELETE") return () => disconnectOutside(request, env, outsideConnection[1]!);
+  if (pathname === "/api/outside/asks" && request.method === "POST") return () => describeOutsideAsk(request, env);
+  if (pathname === "/api/outside/answers" && request.method === "POST") return () => answerOutsideAsk(request, env);
   if (pathname === MEMBERFUL_CONNECTIONS_PATH && request.method === "POST") return () => connectMemberful(request, env);
   if (pathname === MEMBERFUL_CONNECTIONS_PATH && request.method === "DELETE") return () => disconnectMemberful(request, env);
+  if (pathname === SSO_CONNECTIONS_PATH && request.method === "POST") return () => connectSso(request, env);
+  if (pathname === SSO_CONNECTIONS_PATH && request.method === "DELETE") return () => disconnectSso(request, env);
   if (pathname === AVATAR_PATH && request.method === "PUT") return () => changeAvatar(request, env);
   if (pathname === AVATAR_PATH && request.method === "DELETE") return () => removeAvatar(request, env);
   const someone = pathname.match(/^\/api\/users\/([^/]+)$/);
@@ -1140,6 +1652,14 @@ function apiAction(request: Request, env: Env, pathname: string): (() => Respons
   const ban = pathname.match(/^\/api\/users\/([^/]+)\/ban$/);
   if (ban && request.method === "POST") return () => banPerson(request, env, segmentText(ban[1]!));
   if (ban && request.method === "DELETE") return () => unbanPerson(request, env, segmentText(ban[1]!));
+  const blocking = pathname.match(/^\/api\/users\/([^/]+)\/block$/);
+  if (blocking && request.method === "POST") return () => block(request, env, segmentText(blocking[1]!));
+  if (blocking && request.method === "DELETE") return () => unblock(request, env, segmentText(blocking[1]!));
+  const personReport = pathname.match(/^\/api\/users\/([^/]+)\/report$/);
+  if (personReport && request.method === "POST") return () => reportPerson(request, env, segmentText(personReport[1]!));
+  if (pathname === "/api/reports" && request.method === "GET") return () => listReports(request, env);
+  const report = pathname.match(/^\/api\/reports\/([^/]+)$/);
+  if (report && request.method === "POST") return () => handleReport(request, env, segmentText(report[1]!));
   if (pathname === "/api/socket") return () => connectToWorkspace(request, env);
   if (pathname === "/api/rooms" && request.method === "POST") return () => createRoom(request, env);
   if (pathname === "/api/rooms/new" && request.method === "GET") return () => newRoomForm(request, env);
@@ -1178,6 +1698,11 @@ function apiAction(request: Request, env: Env, pathname: string): (() => Respons
   }
   const huddle = pathname.match(/^\/api\/rooms\/([^/]+)\/huddle$/);
   if (huddle) return () => (isRoomId(huddle[1]!) ? connectToRoom(request, env, huddle[1]!, true) : problem(404, ROOM_NOT_FOUND));
+  const huddleInvitation = pathname.match(/^\/api\/rooms\/([^/]+)\/huddle\/invitation$/);
+  if (huddleInvitation && request.method === "DELETE")
+    return () => (isRoomId(huddleInvitation[1]!) ? answerHuddleInvitation(request, env, huddleInvitation[1]!) : problem(404, ROOM_NOT_FOUND));
+  const notifiedBy = pathname.match(/^\/api\/rooms\/([^/]+)\/notified$/);
+  if (notifiedBy && request.method === "GET") return () => (isRoomId(notifiedBy[1]!) ? notified(request, env, notifiedBy[1]!) : problem(404, ROOM_NOT_FOUND));
   const settings = pathname.match(/^\/api\/rooms\/([^/]+)\/settings$/);
   if (settings && request.method === "GET") return () => (isRoomId(settings[1]!) ? roomSettings(request, env, settings[1]!) : problem(404, ROOM_NOT_FOUND));
   const favorite = pathname.match(/^\/api\/rooms\/([^/]+)\/favorite$/);
@@ -1187,6 +1712,8 @@ function apiAction(request: Request, env: Env, pathname: string): (() => Respons
     return () => (isRoomId(involvement[1]!) ? setInvolvement(request, env, involvement[1]!) : problem(404, ROOM_NOT_FOUND));
   const membership = pathname.match(/^\/api\/rooms\/([^/]+)\/membership$/);
   if (membership && request.method === "DELETE") return () => (isRoomId(membership[1]!) ? leaveRoom(request, env, membership[1]!) : problem(404, ROOM_NOT_FOUND));
+  const members = pathname.match(/^\/api\/rooms\/([^/]+)\/members$/);
+  if (members && request.method === "PATCH") return () => (isRoomId(members[1]!) ? changeMembers(request, env, members[1]!) : problem(404, ROOM_NOT_FOUND));
   const uploads = pathname.match(/^\/api\/rooms\/([^/]+)\/uploads$/);
   if (uploads && request.method === "POST") return () => (isRoomId(uploads[1]!) ? startUpload(request, env, uploads[1]!) : problem(404, ROOM_NOT_FOUND));
   // A file's key never needs percent-encoding either, so an encoded segment names no upload.
@@ -1196,6 +1723,9 @@ function apiAction(request: Request, env: Env, pathname: string): (() => Respons
   const preview = pathname.match(/^\/api\/rooms\/([^/]+)\/uploads\/([^/]+)\/preview$/);
   if (preview && request.method === "PUT")
     return () => (isRoomId(preview[1]!) ? uploadPreview(request, env, preview[1]!, preview[2]!) : problem(404, ROOM_NOT_FOUND));
+  const messageReport = pathname.match(/^\/api\/rooms\/([^/]+)\/messages\/([^/]+)\/report$/);
+  if (messageReport && request.method === "POST")
+    return () => (isRoomId(messageReport[1]!) ? reportMessage(request, env, messageReport[1]!, segmentText(messageReport[2]!)) : problem(404, ROOM_NOT_FOUND));
   const room = pathname.match(/^\/api\/rooms\/([^/]+)$/);
   if (room && request.method === "PATCH") return () => (isRoomId(room[1]!) ? changeRoom(request, env, room[1]!) : problem(404, ROOM_NOT_FOUND));
   if (room && request.method === "DELETE") return () => (isRoomId(room[1]!) ? deleteRoom(request, env, room[1]!) : problem(404, ROOM_NOT_FOUND));
@@ -1226,8 +1756,15 @@ async function route(request: Request, env: Env, pathname: string): Promise<Resp
   if (pathname === CSP_REPORT_PATH) return cspReport(request);
   // Nor is Memberful's webhook, which its servers sign with the webhook's secret.
   if (pathname === MEMBERFUL_WEBHOOK_PATH) return memberfulWebhook(request, env);
+  // Nor is the single sign-on provider's back-channel logout, whose token its keys sign.
+  if (pathname === SSO_LOGOUT_PATH) return ssoBackchannelLogout(request, env);
   const write = request.method !== "GET" && request.method !== "HEAD";
+  // Nor is an app's authorization server, reading who Ember is.
+  if (pathname === CLIENT_DOCUMENT_PATH && !write) return clientDocument(request);
   // Nor are a room's files, to whoever has the address, whatever their browser.
+  // Nor are the AI apps that connect to Ember, whose requests carry a token of their own, or nothing.
+  const outside = outsideAction(request, env, pathname);
+  if (outside) return write && isOutsideRegistration(pathname) && (await isFromBannedAddress(request, env)) ? tooManyRequests() : outside();
   const file = fileAddressOf(pathname);
   if (file) return write ? notFound(request) : serveFile(request, env, file);
   const action = apiAction(request, env, pathname) ?? botAction(request, env, pathname);
@@ -1237,11 +1774,16 @@ async function route(request: Request, env: Env, pathname: string): Promise<Resp
   // Then: a browser too old for the app has nothing to sign in to.
   if (isFromUnsupportedBrowser(request)) return unsupportedBrowserPage(request, env);
   if (write && pathname.startsWith("/api/") && isCrossSite(request)) return problem(422, "Requests from other sites are refused");
+  // Nor can another site's page read the API, but for a socket's upgrade, which is checked where it's answered.
+  const upgrading = request.headers.get("Upgrade") === "websocket";
+  if (!write && !upgrading && pathname.startsWith("/api/") && isReadFromAnotherSite(request)) return problem(422, "Requests from other sites are refused");
   if (action) return action();
   if (pathname.startsWith("/api/")) return problem(404, "Not found");
   if (pathname === MEMBERFUL_SIGN_IN_PATH) return startMemberfulSignIn(request, env);
   // Signing in, which a banned IP address can't do, though it's a GET.
   if (pathname === MEMBERFUL_CALLBACK_PATH) return (await isFromBannedAddress(request, env)) ? tooManyRequests() : finishMemberfulSignIn(request, env);
+  if (pathname === SSO_SIGN_IN_PATH) return startSsoSignIn(request, env);
+  if (pathname === SSO_CALLBACK_PATH) return (await isFromBannedAddress(request, env)) ? tooManyRequests() : finishSsoSignIn(request, env);
   if (isSetupPath(pathname)) return setupPage(request, env);
   if (pathname === SIGN_UP_PATH) return signUpPage(request, env);
   if (pathname === INVITATION_PATH) return invitationPage(request, env);
@@ -1261,6 +1803,8 @@ async function route(request: Request, env: Env, pathname: string): Promise<Resp
   if (page?.page === "person") return personPage(request, env, pathname, page.userId);
   if (page?.page === "bot-settings") return botPage(request, env, pathname, page.userId);
   if (page?.page === "agent-settings") return agentPage(request, env, pathname, page.agentId);
+  if (page?.page === "app-settings") return appPage(request, env, pathname, page.appId);
+  if (pathname === OUTSIDE_AUTHORIZE_PATH && !write) return outsideConnectPage(request, env, pathname);
   return anyOtherPage(request, env, pathname);
 }
 

@@ -18,6 +18,7 @@ describe("Rich text, safely", () => {
       html: '<p>Hi <strong>all</strong></p><pre data-language="ruby">x = 1</pre>',
       plainText: "Hi all\n\nx = 1",
       mentions: [],
+      specialMentions: [],
       blank: false,
     });
     expect(prepare('<a href="https://example.com" target="_blank">x</a>')?.html).toBe('<a href="https://example.com">x</a>');
@@ -67,12 +68,29 @@ describe("How mentions look", () => {
         { id: testUserId(1), name: "David" },
         { id: testUserId(2), name: "Jason" },
       ],
+      specialMentions: [],
       blank: false,
     });
   });
 
   it("stores ☒ for a mention of someone who doesn't exist", () => {
-    expect(prepare(`<p>Hi ${mention(3)}</p>`)).toEqual({ html: "<p>Hi ☒</p>", plainText: "Hi ☒", mentions: [], blank: false });
+    expect(prepare(`<p>Hi ${mention(3)}</p>`)).toEqual({ html: "<p>Hi ☒</p>", plainText: "Hi ☒", mentions: [], specialMentions: [], blank: false });
+  });
+
+  it("stores @here, @channel and @everyone as mentions whose sgid is their name, once each, read as their plain text", () => {
+    const special = (name: string) => `<action-text-attachment sgid="${name}" content-type="application/vnd.campfire.mention" content="&lt;span&gt;@${name}&lt;/span&gt;"></action-text-attachment>`;
+    const stored = (name: string) => `<action-text-attachment content-type="application/vnd.campfire.mention" sgid="${name}"></action-text-attachment>`;
+    expect(prepare(`<p>${special("here")} and ${special("channel")}, ${mention(1)} and ${special("here")}</p>`)).toEqual({
+      html: `<p>${stored("here")} and ${stored("channel")}, ${storedMention(1)} and ${stored("here")}</p>`,
+      plainText: "@here and @channel, @David and @here",
+      mentions: [{ id: testUserId(1), name: "David" }],
+      specialMentions: ["here", "channel"],
+      blank: false,
+    });
+    expect(prepare(`<p>${special("everyone")}</p>`)).toMatchObject({ html: `<p>${stored("everyone")}</p>`, plainText: "@everyone", specialMentions: ["everyone"] });
+    expect(prepare(`<p>${special("Here")}</p>`)).toMatchObject({ html: "<p>☒</p>", specialMentions: [] });
+    const prepared = prepare(`<p>${special("channel")}</p>`)!;
+    expect(prepare(prepared.html)).toEqual(prepared);
   });
 
   it("keeps a user's id in its attribute, whatever characters it holds", () => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { NewRoom, Room, RoomIconName, User, UserId } from "@ember/protocol";
+import type { Me, NewRoom, Room, RoomIconName, SectionChoice, SectionOption, User, UserId } from "@ember/protocol";
 import { useFlash } from "@/components/flash";
 import { useMounted } from "@/hooks/use-mounted";
 import { navigate, newRoomPath, roomPath, type Access } from "@/hooks/use-route";
@@ -19,7 +19,7 @@ const isNewRoomPath = (path: string) => path === newRoomPath("open") || path ===
 interface Props {
   /** Which of the two forms the address shows: a room for everyone, or a private one. */
   access: Access;
-  me: User;
+  me: Me;
   /** Lists the room made, for the sidebar. The page then shows it, unless it was left first. */
   onCreated: (room: Room) => void;
   /** Says why something failed, as the workspace's alerts do. */
@@ -29,13 +29,16 @@ interface Props {
 /**
  * The New room pages, for an open room and a private one. The Everyone switch swaps one for the other in
  * place, keeping what's been filled in, and leaving with anything filled in asks first. While only
- * administrators can create rooms, anyone else is sent to workspace settings with an alert.
+ * administrators can create rooms, anyone else is sent to workspace settings with an alert. The room
+ * goes in no sidebar section unless one is picked, or for an administrator, made.
  */
 export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
   useTitle("New chat room");
   const [people, setPeople] = useState<User[] | null>(null);
+  const [sections, setSections] = useState<SectionOption[]>([]);
   const [name, setName] = useState(DEFAULT_ROOM_NAME);
   const [icon, setIcon] = useState<RoomIconName | null>(null);
+  const [section, setSection] = useState<SectionChoice>(null);
   const [chosen, setChosen] = useState<ReadonlySet<UserId>>(new Set());
   const [saving, setSaving] = useState(false);
   // The room the unsaved changes dialog's Save made, while the app goes on to where the person was going.
@@ -49,7 +52,11 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
   useEffect(() => {
     let stopped = false;
     fetchNewRoomForm().then(
-      (form) => !stopped && setPeople(form.people),
+      (form) => {
+        if (stopped) return;
+        setPeople(form.people);
+        setSections(form.sections);
+      },
       (error: unknown) => {
         // A page left before its form loads only reports a session that's ended, which goes to sign in.
         if (stopped && !isSignedOut(error)) return;
@@ -65,7 +72,8 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
   /** Creates the room and lists it in the sidebar. */
   const send = () => {
     // The private form lists its creator with a check mark and sends them as one of its members.
-    const room: NewRoom = access === "open" ? { kind: access, name, icon: icon ?? "" } : { kind: access, name, icon: icon ?? "", memberIds: [me.id, ...chosen] };
+    const kept = { name, icon: icon ?? "", ...(section !== null && { section }) } satisfies Omit<NewRoom, "kind">;
+    const room: NewRoom = access === "open" ? { ...kept, kind: access } : { ...kept, kind: access, memberIds: [me.id, ...chosen] };
     return createRoom(room).then((room) => {
       onCreated(room);
       setCreated(room);
@@ -93,7 +101,10 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
 
   // Anything filled in, or the other form, which the page didn't open on, until the room's made.
   const changed =
-    people !== null && !saving && !created && (name !== DEFAULT_ROOM_NAME || icon !== null || access !== opened || (access === "closed" && chosen.size > 0));
+    people !== null &&
+    !saving &&
+    !created &&
+    (name !== DEFAULT_ROOM_NAME || icon !== null || section !== null || access !== opened || (access === "closed" && chosen.size > 0));
   return (
     // Go Back returns to Rooms and permissions.
     <SettingsPage back={workspaceSectionPath("channel-settings")}>
@@ -106,6 +117,7 @@ export function NewRoomPage({ access, me, onCreated, onFailed }: Props) {
             onNameChange={setName}
             icon={icon}
             onIconChange={setIcon}
+            section={{ sections, value: section, onChange: setSection, canMake: me.administrator }}
             everyone={{ on: access === "open", onFlip: () => navigate(newRoomPath(access === "open" ? "closed" : "open"), { replace: true }) }}
             groups={[people]}
             mark={(person) =>

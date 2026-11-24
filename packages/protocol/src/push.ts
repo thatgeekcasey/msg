@@ -1,5 +1,8 @@
 // Web Push subscriptions, as `/api/push-subscriptions` takes and lists them, and signing out forgets
-// this browser's, as Campfire's `push_subscriptions` and `sessions#destroy` do.
+// this browser's, as Campfire's `push_subscriptions` and `sessions#destroy` do, and pausing
+// notifications, as Slack's Do Not Disturb does.
+
+import type { DirectoryUser } from "./index.ts";
 
 /** The longest endpoint saved. Push services' are a few hundred characters. */
 export const MAX_PUSH_ENDPOINT_LENGTH = 2048;
@@ -75,4 +78,38 @@ export function parsePushSubscription(data: unknown): PushSubscriptionSave | str
 export function signOutEndpointOf(data: unknown): string | null {
   const { pushSubscriptionEndpoint: endpoint } = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
   return typeof endpoint === "string" && endpoint !== "" && endpoint.length <= MAX_PUSH_ENDPOINT_LENGTH ? endpoint : null;
+}
+
+/**
+ * The longest notifications can be paused for: a week. The rail offers until tomorrow at most, and
+ * holding the end so close keeps a pause from being forgotten for good.
+ */
+export const LONGEST_PAUSE_MS = 7 * 24 * 60 * 60_000;
+
+/**
+ * What `PUT /api/users/me/notifications-pause` takes: when a pause of your notifications ends, as an ISO
+ * time the browser works out in its own time zone, since Ember keeps nobody's, or null to resume them.
+ */
+export interface NotificationsPause {
+  until: string | null;
+}
+
+/** What it answers: you as the people directory lists you now, `pausedUntil` saying until when, if you're paused. */
+export interface NotificationsPaused {
+  user: DirectoryUser;
+}
+
+/**
+ * Parses what `PUT /api/users/me/notifications-pause` takes, as of `now`, in milliseconds since the
+ * epoch: an end as `toISOString` writes one, after `now` and no more than `LONGEST_PAUSE_MS` after it,
+ * or null. Returns why it's refused instead.
+ */
+export function parseNotificationsPause(data: unknown, now: number): NotificationsPause | string {
+  const { until } = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+  if (until === null) return { until };
+  const end = typeof until === "string" ? Date.parse(until) : NaN;
+  if (typeof until !== "string" || Number.isNaN(end) || new Date(end).toISOString() !== until) return "A pause needs the time it ends, or null to resume notifications";
+  if (end <= now) return "A pause can't end in the past";
+  if (end - now > LONGEST_PAUSE_MS) return "Notifications can be paused for a week at most";
+  return { until };
 }

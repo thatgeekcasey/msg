@@ -1,5 +1,5 @@
 import { MAX_PUSH_SUBSCRIPTIONS, type PushSubscriptions } from "@ember/protocol";
-import type { Page } from "@playwright/test";
+import { devices, type Page } from "@playwright/test";
 import { administratorOn, allowNotifications, logOut, PUSH_KEYS, uniqueEndpoint, VAPID_PUBLIC_KEY } from "../../fixtures";
 import { expect, startDirect, test, unique } from "./fixtures";
 
@@ -143,7 +143,8 @@ test.describe("Turn on notifications", () => {
     const dialog = setup(grace.page);
     await expect(dialog.getByRole("heading", { level: 1 })).toHaveText("Notifications aren’t configured");
     await expect(dialog.getByRole("status")).toHaveText("Ask your workspace administrator to configure Web Push on this server.");
-    await expect(dialog.locator("details")).not.toBeVisible();
+    // None of the help shows: it's in the page, hidden, as two sections in Safari.
+    await expect(dialog.locator("details").filter({ visible: true })).toHaveCount(0);
     await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
     await dialog.getByRole("button", { name: "Close" }).click();
     await expect(dialog).toBeHidden();
@@ -172,7 +173,11 @@ test.describe("Turn on notifications", () => {
   });
 
   test("gives the help for this browser when they aren't available, its one section open", async ({ members }) => {
-    const grace = await members.signIn(unique("Grace"), { beforeOpen: async (page) => void (await page.addInitScript(() => Reflect.deleteProperty(window, "PushManager"))) });
+    // The help is picked by what the browser says it is, Desktop Chrome here in either engine.
+    const grace = await members.signIn(unique("Grace"), {
+      context: { userAgent: devices["Desktop Chrome"].userAgent },
+      beforeOpen: async (page) => void (await page.addInitScript(() => Reflect.deleteProperty(window, "PushManager"))),
+    });
     await enableButton(grace.page).click();
     const dialog = setup(grace.page);
     await expect(dialog.getByRole("heading", { level: 1 })).toHaveText("Notifications aren’t available here");
@@ -218,6 +223,55 @@ test.describe("Levels on your profile", () => {
     await expect(general).toHaveCSS("opacity", "1");
     await expect(roomRows(grace.page)).toHaveText(["#general", "#random"]);
     await expect(activity(grace.page)).toHaveAccessibleDescription("1 unread");
+  });
+});
+
+/** The rail's Pause notifications, named for when the pause ends while there's one. */
+const pauseButton = (page: Page) => page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: /^(Pause notifications|Notifications paused until .+)$/ });
+
+/** The half-moon on `member`'s picture in `page`'s rail, shown while their notifications are paused. */
+const yourPauseMark = (page: Page) => page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Your profile" }).locator("[data-paused]");
+
+test.describe("Pause notifications", () => {
+  test("pauses them from the rail for everywhere you're signed in, with a half-moon on your picture that the others see, kept on reload until you resume them on your profile", async ({ members, request }) => {
+    const ada = await members.signIn(unique("Ada"));
+    const grace = await members.signIn(unique("Grace"));
+    await startDirect(request, ada, [grace]);
+    const adaInGraces = grace.page.getByRole("region", { name: "DMs" }).getByRole("link", { name: `Direct message with ${ada.name}`, exact: true });
+    await expect(adaInGraces).toHaveAccessibleDescription(/^Active/);
+    await expect(adaInGraces.locator("[data-paused]")).toHaveCount(0);
+    const secondTab = await ada.page.context().newPage();
+    await secondTab.goto("/");
+    await expect(pauseButton(secondTab)).toHaveAccessibleName("Pause notifications");
+
+    await pauseButton(ada.page).click();
+    await expect(ada.page.getByRole("menuitem")).toHaveText(["30 minutes", "1 hour", "2 hours", "Until tomorrow"]);
+    await ada.page.getByRole("menuitem", { name: "1 hour" }).click();
+    for (const page of [ada.page, secondTab]) {
+      await expect(pauseButton(page)).toHaveAccessibleName(/^Notifications paused until (tomorrow at )?\d{1,2}:\d{2}/);
+      await expect(yourPauseMark(page)).toBeVisible();
+    }
+    await expect(adaInGraces).toHaveAccessibleDescription(/^Active, notifications paused/);
+    await expect(adaInGraces.locator("[data-paused]")).toBeVisible();
+
+    // The server keeps it: a reload shows it paused still, and its menu offers to resume them.
+    await ada.page.reload();
+    await expect(pauseButton(ada.page)).toHaveAccessibleName(/^Notifications paused until /);
+    await pauseButton(ada.page).click();
+    await expect(ada.page.getByRole("menuitem")).toHaveText(["Resume notifications", "30 minutes", "1 hour", "2 hours", "Until tomorrow"]);
+    await ada.page.keyboard.press("Escape");
+
+    await openYourProfile(secondTab);
+    const onProfile = secondTab.getByRole("region", { name: "Pause notifications" });
+    await expect(onProfile).toContainText(/Paused until (tomorrow at )?\d{1,2}:\d{2}/);
+    await onProfile.getByRole("button", { name: "Resume notifications" }).click();
+    await expect(onProfile.getByRole("button", { name: "Resume notifications" })).toHaveCount(0);
+    for (const page of [ada.page, secondTab]) {
+      await expect(pauseButton(page)).toHaveAccessibleName("Pause notifications");
+      await expect(yourPauseMark(page)).toHaveCount(0);
+    }
+    await expect(adaInGraces).not.toHaveAccessibleDescription(/notifications paused/);
+    await expect(adaInGraces.locator("[data-paused]")).toHaveCount(0);
   });
 });
 
@@ -282,7 +336,7 @@ test.describe("Save push subscriptions", () => {
 });
 
 test.describe("Push subscriptions page", () => {
-  test("lists the browser that turned them on at /users/me/push_subscriptions, where a test push fails while the server has no Web Push keys, and deletes it", async ({ members }) => {
+  test("lists the browser that turned them on at /users/me/push_subscriptions, where a test push fails while the server has no Web Push keys, and deletes it", async ({ members, browserName }) => {
     const endpoint = uniqueEndpoint();
     const grace = await members.signIn(unique("Grace"), { beforeOpen: (page) => allowNotifications(page.context(), { endpoint, on: false }) });
     const saved = grace.page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/push-subscriptions");
@@ -295,8 +349,8 @@ test.describe("Push subscriptions page", () => {
     await expect(grace.page.getByRole("heading", { level: 1 })).toHaveText("Push Notification Subscriptions");
     const rows = grace.page.getByRole("list", { name: "Push Notification Subscriptions" }).getByRole("listitem");
     await expect(rows).toHaveCount(1);
-    // Desktop Chrome, as the user_agent gem names it.
-    await expect(rows.locator("strong")).toHaveText(/^Chrome [\d.]+ on Windows$/);
+    // Desktop Chrome or Desktop Safari, as the user_agent gem names them.
+    await expect(rows.locator("strong")).toHaveText(browserName === "webkit" ? /^Safari [\d.]+ on Macintosh$/ : /^Chrome [\d.]+ on Windows$/);
     await expect(rows).toContainText(endpoint);
 
     await rows.getByRole("button", { name: "Send test notification" }).click();

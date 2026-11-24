@@ -1,13 +1,17 @@
 import { AVATAR_BOX, isPreviewableSize, isPreviewed, isVariable, LOGO_BOXES, PREVIEW_MAX_HEIGHT, PREVIEW_MAX_WIDTH } from "@ember/protocol";
+import { posterTimeOf } from "./clips";
 
 // Previews of files, which the uploader's browser makes and the app sends before a file's last part, where
 // Campfire makes them on the server: a picture's thumbnail, as its `:thumb` variant resizes it to fit
 // 1200×800, and a video's poster, which Campfire's ffmpeg takes from its first frame and Ember from a
-// tenth of a second in, past the blank frame some browsers draw at the start. Both are still, so an
-// animated picture's is its first frame. An avatar's variant is made as a picture's thumbnail is, to fit
-// 512×512, as Campfire's `:square` variant resizes it, and a logo's two as PNGs within 512×512 and
-// 192×192, as its logo's `:large` and `:small` variants are. None is made of a picture or video over 250
-// megapixels, which isn't decoded, as Campfire makes none (`THUMBNAIL_MAX_PIXELS`).
+// tenth of a second in, past the blank frame some browsers draw at the start, or from where a clip's
+// thumbnail was chosen as it was recorded in the composer. Both are still, so an animated picture's is its
+// first frame. An avatar's variant is made as a picture's thumbnail is, to fit 512×512, as Campfire's
+// `:square` variant resizes it, and a logo's two as PNGs within 512×512 and 192×192, as its logo's
+// `:large` and `:small` variants are. None is made of a picture or video over 250 megapixels, which isn't
+// decoded, as Campfire makes none (`THUMBNAIL_MAX_PIXELS`). The Worker has Cloudflare Images make the
+// thumbnail of a picture that came without one, where the message would otherwise show it as a file
+// (apps/worker/src/files/previews.ts).
 
 /** A picture's or video's width and height, in pixels. */
 export interface Size {
@@ -50,7 +54,7 @@ export function fitted({ width, height }: Size, limit = PREVIEW_LIMIT): Size {
 export async function previewOf(file: File): Promise<Blob | null> {
   if (!isPreviewed(file.type)) return null;
   return madeOf(file, (url, signal) =>
-    file.type.startsWith("video") ? posterOf(url, signal) : thumbnailOf(url, file.type !== "image/jpeg", PREVIEW_LIMIT, signal),
+    file.type.startsWith("video") ? posterOf(url, signal, posterTimeOf(file)) : thumbnailOf(url, file.type !== "image/jpeg", PREVIEW_LIMIT, signal),
   );
 }
 
@@ -121,11 +125,20 @@ async function pictureAt(url: string, signal: AbortSignal): Promise<HTMLImageEle
 const sizeOf = (picture: HTMLImageElement): Size => ({ width: picture.naturalWidth, height: picture.naturalHeight });
 
 /**
- * The poster of the video at `url`, or null for one with no picture, such as a recording of sound alone,
- * or one over 250 megapixels, which it seeks no frame of, unless `signal` aborts before it has loaded and
- * sought, when it lets go of the video at once.
+ * Where in a video `duration` seconds long its poster is taken from: `chosen`, as a clip's thumbnail is,
+ * within the video, or else a tenth of a second in, or halfway through a shorter one.
  */
-async function posterOf(url: string, signal: AbortSignal): Promise<Blob | null> {
+export function posterTime(duration: number, chosen?: number): number {
+  if (!Number.isFinite(duration)) return chosen ?? POSTER_TIME;
+  return chosen === undefined ? Math.min(POSTER_TIME, duration / 2) : Math.min(chosen, duration);
+}
+
+/**
+ * The poster of the video at `url`, from `chosen` seconds in if it's given, or null for one with no
+ * picture, such as a recording of sound alone, or one over 250 megapixels, which it seeks no frame of,
+ * unless `signal` aborts before it has loaded and sought, when it lets go of the video at once.
+ */
+async function posterOf(url: string, signal: AbortSignal, chosen?: number): Promise<Blob | null> {
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
@@ -135,7 +148,7 @@ async function posterOf(url: string, signal: AbortSignal): Promise<Blob | null> 
     await nextEvent(video, "loadedmetadata", signal);
     const size = { width: video.videoWidth, height: video.videoHeight };
     if (!isPreviewableSize(size)) return null;
-    video.currentTime = Number.isFinite(video.duration) ? Math.min(POSTER_TIME, video.duration / 2) : POSTER_TIME;
+    video.currentTime = posterTime(video.duration, chosen);
     await nextEvent(video, "seeked", signal);
     return await encoded(video, fitted(size), false);
   } finally {

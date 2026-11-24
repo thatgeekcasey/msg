@@ -55,7 +55,8 @@ export function useFlash(): Flasher {
  *   Campfire's reset cuts the animation to nothing, so its flash never shows;
  * - grows to fit its text, up to the screen's width less 24px, where Campfire's stops at half the
  *   screen's width, as its flash.css centers it from the middle, and so wraps early on a phone;
- * - keeps 12px below the header, and centered on the page, where they make room for a notch.
+ * - keeps 12px below the header, under the workspace's top bar where that shows, and centered on the
+ *   page, where they make room for a notch.
  */
 function Flash({ message: { kind, text }, workspace, onDone }: { message: FlashMessage; workspace: boolean; onDone: () => void }) {
   const Sign = kind === "alert" ? WarningTriangle : CheckCircle;
@@ -67,7 +68,7 @@ function Flash({ message: { kind, text }, workspace, onDone }: { message: FlashM
       className={cn(
         "pointer-events-none fixed top-[calc(var(--spacing-header)+12px)] left-1/2 max-md:top-[calc(56px+env(safe-area-inset-top)+12px)] z-30 flex w-max max-w-[calc(100dvw-24px)] -translate-x-1/2 justify-center",
         workspace &&
-          "md:left-[calc((100%+env(safe-area-inset-left)+var(--spacing-rail)+var(--spacing-sidebar))/2)] md:max-w-[calc(100dvw-env(safe-area-inset-left)-var(--spacing-rail)-var(--spacing-sidebar)-24px)]",
+          "md:top-[calc(var(--spacing-top-bar)+var(--spacing-header)+12px)] md:left-[calc((100%+env(safe-area-inset-left)+var(--spacing-rail)+var(--spacing-sidebar))/2)] md:max-w-[calc(100dvw-env(safe-area-inset-left)-var(--spacing-rail)-var(--spacing-sidebar)-24px)]",
       )}
     >
       <div

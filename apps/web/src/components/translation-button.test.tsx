@@ -6,7 +6,7 @@ import { AccountContext } from "@/hooks/use-account";
 import { TranslationButton } from "./translation-button";
 
 /** A workspace whose administrator has shown translation buttons. */
-const shown: Account = { name: "Ember", tagline: "", hideTranslationButtons: false, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false };
+const shown: Account = { name: "Ember", tagline: "", hideTranslationButtons: false, customStyles: "", restrictRoomCreation: false, restrictChannelMentions: false, restrictEveryoneMention: false, warnBeforeNotifying: true, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, ssoJoin: false, ssoSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false, huddleCameras: true, huddleScreens: true, huddleVideo: "hd" };
 
 /** The workspace name's button, after a field, in `account`. */
 function showButton(account = shown) {

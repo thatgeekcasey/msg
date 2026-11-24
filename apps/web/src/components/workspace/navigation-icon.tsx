@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { NavigationSlot, RoomIconName } from "@ember/protocol";
-import { Bell, Box, Computer, HalfMoon, Home, MultiBubble, Search, SunLight } from "@/components/icons/iconoir";
+import { Bell, BellOff, Box, Computer, HalfMoon, Home, MultiBubble, Search, SunLight } from "@/components/icons/iconoir";
 import { RoomIcon } from "@/components/icons/room-icon";
 import { useAccount } from "@/hooks/use-account";
 
@@ -11,6 +11,7 @@ const OWN_ICONS: Record<NavigationSlot, ComponentType<{ className?: string }>> =
   activity: Bell,
   search: Search,
   admin: Box,
+  pause: BellOff,
   light: SunLight,
   dark: HalfMoon,
   system: Computer,
@@ -30,8 +31,8 @@ export function SlotIcon({ slot, icon, size, className }: Props & { icon: RoomIc
 }
 
 /**
- * The icon an administrator chose in Community settings for one of the rail's buttons or an appearance
- * mode, or the slot's own.
+ * The icon an administrator chose in Community settings for one of the rail's buttons, the top bar's
+ * search field or an appearance mode, or the slot's own.
  */
 export function NavigationIcon(props: Props) {
   return <SlotIcon icon={useAccount().navigationIcons[props.slot] ?? null} {...props} />;

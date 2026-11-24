@@ -1,9 +1,11 @@
 import type { DirectoryUser, Me, Room, RoomId, Search, SearchResults, SearchSort } from "@ember/protocol";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { RefObject } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PeopleContext, type People } from "@/hooks/use-directory";
 import { guardLeaving, navigate, pageMark } from "@/hooks/use-route";
+import { safeAreaBoundary } from "@/lib/safe-area";
 import { takeAnswer } from "@/lib/search";
 import { CONFIRM_CLEAR_SEARCHES, SearchBox } from "./search-box";
 
@@ -54,10 +56,12 @@ interface Options {
   directory?: People;
   /** The rooms the sidebar lists, until `listRooms` lists others. */
   listed?: Room[];
+  /** The top bar's search field, which it opens over. */
+  anchor?: RefObject<HTMLElement | null>;
 }
 
 /** The search box as Ada opens it over a room's page, with the drawer's toggle in its header. */
-function showBox({ roomId, search, sort, opener = true, directory = people, listed = rooms }: Options = {}) {
+function showBox({ roomId, search, sort, opener = true, directory = people, listed = rooms, anchor }: Options = {}) {
   history.replaceState(null, "", "/rooms/general");
   const [onClose, onFailed] = [vi.fn(), vi.fn()];
   render(
@@ -71,7 +75,7 @@ function showBox({ roomId, search, sort, opener = true, directory = people, list
   const link = opener ? screen.getByRole("link", { name: "Search" }) : null;
   const boxListing = (shown: Room[]) => (
     <PeopleContext value={directory}>
-      <SearchBox opener={link} search={search} sort={sort} roomId={roomId} me={ada} rooms={shown} onClose={onClose} onFailed={onFailed} />
+      <SearchBox opener={link} search={search} sort={sort} roomId={roomId} me={ada} rooms={shown} anchor={anchor} onClose={onClose} onFailed={onFailed} />
     </PeopleContext>
   );
   const { rerender } = render(boxListing(listed));
@@ -117,7 +121,7 @@ describe("Search box", () => {
     expect(requests()).toEqual([["GET", "/api/searches?q="]]);
   });
 
-  it("opens everywhere from the rail, offering only your recent searches until there's something to search for", async () => {
+  it("opens everywhere from the top bar, offering only your recent searches until there's something to search for", async () => {
     serve([{ q: "launch" }]);
     showBox();
     expect(await screen.findByRole("option", { name: "launch" })).toBeInTheDocument();
@@ -144,6 +148,63 @@ describe("Search box", () => {
     await user.keyboard("{Enter}");
     await waitFor(() => expect(here()).toBe("/searches?q=eel&has=link&sort=oldest"));
     expect(requests()).toContainEqual(["POST", "/api/searches", { q: "eel", hasLink: true, sort: "oldest" }]);
+  });
+});
+
+describe("Over the top bar", () => {
+  /** A box at `rect`, as jsdom lays nothing out. */
+  const rectOf = ({ top, left, width, height }: { top: number; left: number; width: number; height: number }): DOMRect =>
+    ({ top, left, width, height, bottom: top + height, right: left + width, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  /** The top bar's search field, drawn at `rect` until it's `hidden`, as at 900px and below, in a window `screen` sized, clear of `insets`. */
+  function topBarField(rect: { top: number; left: number; width: number }, screen = { width: 1280, height: 800 }, insets = { left: 0, right: 0 }) {
+    const field = document.createElement("button");
+    document.body.append(field);
+    const drawn = { hidden: false, rect, screen, insets };
+    field.getBoundingClientRect = () => rectOf({ ...drawn.rect, height: 30 });
+    field.getClientRects = () => (drawn.hidden ? [] : [field.getBoundingClientRect()]) as unknown as DOMRectList;
+    safeAreaBoundary().getBoundingClientRect = () =>
+      rectOf({ top: 0, left: drawn.insets.left, width: drawn.screen.width - drawn.insets.left - drawn.insets.right, height: drawn.screen.height });
+    return { anchor: { current: field }, drawn };
+  }
+  const overlay = () => document.querySelector("[data-slot=dialog-overlay]");
+
+  // The boundary's own way of measuring itself back, as menus use it too.
+  afterEach(() => void Reflect.deleteProperty(safeAreaBoundary(), "getBoundingClientRect"));
+
+  it("opens over the top bar's field, wider than it and at least 680px, as tall as the window leaves it, leaving the page undimmed", async () => {
+    serve();
+    const { anchor } = topBarField({ top: 7, left: 300, width: 500 });
+    showBox({ anchor });
+    expect(box()).toHaveStyle({ top: "4px", left: "292px", width: "680px", maxWidth: "none", maxHeight: "784px" });
+    expect(overlay()).toHaveClass("bg-transparent");
+    expect(overlay()).not.toHaveClass("bg-dialog-backdrop");
+    await waitFor(() => expect(requests()).toHaveLength(1));
+  });
+
+  it("stays 8px inside the window, clear of the screen's insets, as the window is resized, and opens in the middle of the screen while the bar isn't drawn", async () => {
+    serve();
+    const { anchor, drawn } = topBarField({ top: 40, left: 540, width: 400 }, { width: 1000, height: 700 });
+    showBox({ anchor });
+    expect(box()).toHaveStyle({ top: "34px", left: "312px", width: "680px" });
+
+    drawn.rect = { top: 7, left: 100, width: 900 };
+    drawn.screen = { width: 1100, height: 700 };
+    act(() => void window.dispatchEvent(new Event("resize")));
+    expect(box()).toHaveStyle({ top: "4px", left: "92px", width: "916px" });
+
+    // A screen with 62px at either side that it doesn't draw in, as an iPhone's on its side.
+    drawn.rect = { top: 11, left: 372, width: 522 };
+    drawn.screen = { width: 956, height: 390 };
+    drawn.insets = { left: 62, right: 62 };
+    act(() => void window.dispatchEvent(new Event("resize")));
+    expect(box()).toHaveStyle({ top: "5px", left: "206px", width: "680px", maxHeight: "373px" });
+
+    drawn.hidden = true;
+    act(() => void window.dispatchEvent(new Event("resize")));
+    expect(box()!.style.top).toBe("");
+    expect(box()!.style.width).toBe("");
+    expect(overlay()).toHaveClass("bg-dialog-backdrop");
+    await waitFor(() => expect(requests()).toHaveLength(1));
   });
 });
 

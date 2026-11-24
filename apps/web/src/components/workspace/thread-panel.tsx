@@ -1,15 +1,17 @@
-import { useEffect, useEffectEvent, useMemo, useRef } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, type ReactNode } from "react";
 import type { Me, Message, Room } from "@ember/protocol";
 import { ArrowLeft, ChatBubbleEmpty, Xmark } from "@/components/icons/iconoir";
 import { RoomIcon } from "@/components/icons/room-icon";
 import { PageLink } from "@/components/page-link";
+import { useGivingBack } from "@/hooks/use-giving-back";
 import { useMessageEditors } from "@/hooks/use-message-editors";
 import type { RoomFrames } from "@/hooks/use-room";
 import { roomPath, useVisit } from "@/hooks/use-route";
 import { useThread } from "@/hooks/use-thread";
 import { isPending, type ConnectionStatus } from "@/lib/room-state";
+import type { CommandRunner, SlashCommand } from "@/lib/slash-commands";
 import { cn } from "@/lib/utils";
-import { Composer, RoomDeleted, type ComposerHandle } from "./composer";
+import { Composer, RoomDeleted, type ComposerHandle, type ComposerScheduling } from "./composer";
 import { MessageItem, repliesLabel, type MessageActions, type MessageEditors, type ThreadPlace } from "./message-item";
 import { MessageList } from "./message-list";
 import { RoomNotice } from "./room-notice";
@@ -35,6 +37,11 @@ interface Props {
   /** What the room has to say while the thread covers it, as why it refused something done in the thread. */
   roomNotice: string | null;
   onDismissRoomNotice: () => void;
+  /** The commands / lists, which run as the room's composer runs them. */
+  commands?: readonly SlashCommand[];
+  onCommand?: CommandRunner;
+  /** Schedule for later, as the room's composer has it, whose line over the thread's composer counts what's scheduled in the thread. */
+  scheduling?: ComposerScheduling;
 }
 
 /**
@@ -43,15 +50,8 @@ interface Props {
  * the room's right, below that it covers the room, and on phones the whole page, with Back in its header
  * in Close thread's place.
  */
-export function ThreadPanel({ room, name, me, parentId, replyId, frames, status, offline, deleted, roomNotice, onDismissRoomNotice }: Props) {
+export function ThreadPanel({ room, name, me, parentId, replyId, frames, status, offline, deleted, roomNotice, onDismissRoomNotice, commands, onCommand, scheduling }: Props) {
   const thread = useThread(room.id, frames, status, offline, me, parentId, replyId);
-  const { parent, replies } = thread.state;
-  // Replying tells nobody you're typing, so only @ember shows as typing here, as it answers in the thread.
-  const typing = useMemo(() => Object.values(replies.typing).map((t) => t.user), [replies.typing]);
-  const direct = room.kind === "direct";
-  const composer = useRef<ComposerHandle>(null);
-  const { editing, editors } = useMessageEditors(composer);
-  const actions = deleted ? null : thread.messageActions;
 
   // Following a reply's permalink in the thread goes to it, or the thread's own link to its end, as a
   // room's permalinks do.
@@ -64,13 +64,6 @@ export function ThreadPanel({ room, name, me, parentId, replyId, frames, status,
     goTo(replyId ?? null);
   }, [replyId, visit]);
 
-  // Up Arrow edits your newest reply, as the room's composer edits your newest message.
-  const editLastReply = () => {
-    const newest = replies.messages.findLast((message) => message.creator.id === me.id);
-    if (newest && !isPending(newest)) editors.open(newest.id);
-  };
-
-  const place: ThreadPlace = { roomName: name, direct };
   const back = roomPath(room.id);
 
   return (
@@ -109,6 +102,72 @@ export function ThreadPanel({ room, name, me, parentId, replyId, frames, status,
           <Xmark className="size-5" />
         </PageLink>
       </header>
+      <ThreadReplies
+        room={room}
+        name={name}
+        me={me}
+        thread={thread}
+        offline={offline}
+        deleted={deleted}
+        roomNotice={roomNotice}
+        onDismissRoomNotice={onDismissRoomNotice}
+        commands={commands}
+        onCommand={onCommand}
+        scheduling={scheduling}
+      />
+    </aside>
+  );
+}
+
+interface RepliesProps {
+  room: Room;
+  /** The room's name as the reader reads it. */
+  name: string;
+  me: Me;
+  /** The thread, as `useThread` keeps it over the socket it's shown by. */
+  thread: ReturnType<typeof useThread>;
+  offline: boolean;
+  /** Whether the room has gone for this person. */
+  deleted: boolean;
+  /** What the room has to say that shows nowhere else while the thread does. */
+  roomNotice: string | null;
+  onDismissRoomNotice: () => void;
+  /** What stands over the replies in the thread's message's place, where a thread shows without it, as a huddle's does. */
+  intro?: ReactNode;
+  /** Whether the composer takes the focus as it shows, as it does unless something else is to keep it, as a huddle is that opens with its thread. */
+  autoFocus?: boolean;
+  /** Whether the people the composer's @ lists show above the text with a mouse too, as where the panel ends over something that would cut the list off. */
+  mentionsAbove?: boolean;
+  /** The commands / lists, which run as the room's composer runs them. Without them, as in a huddle's thread, a / is just a /. */
+  commands?: readonly SlashCommand[];
+  onCommand?: CommandRunner;
+  /** Schedule for later, as the room's composer has it. Without it, as in a huddle's thread, replies go as they're sent. */
+  scheduling?: ComposerScheduling;
+}
+
+/**
+ * A thread under its panel's header, wherever the panel is: what the room has to say, the thread's
+ * message over its replies, and a composer to reply with, while the room has the message.
+ */
+export function ThreadReplies({ room, name, me, thread, offline, deleted, roomNotice, onDismissRoomNotice, intro, autoFocus, mentionsAbove, commands, onCommand, scheduling }: RepliesProps) {
+  const { parentId, parent, replies } = thread.state;
+  // Replying tells nobody you're typing, so only @ember shows as typing here, as it answers in the thread.
+  const typing = useMemo(() => Object.values(replies.typing), [replies.typing]);
+  const direct = room.kind === "direct";
+  const composer = useRef<ComposerHandle>(null);
+  const { editing, editors } = useMessageEditors(composer);
+  useGivingBack(replies.messages, composer, thread.givenBack);
+  const actions = deleted ? null : thread.messageActions;
+
+  // Up Arrow edits your newest reply, as the room's composer edits your newest message.
+  const editLastReply = () => {
+    const newest = replies.messages.findLast((message) => message.creator.id === me.id);
+    if (newest && !isPending(newest)) editors.open(newest.id);
+  };
+
+  const place: ThreadPlace = { roomName: name, direct };
+  return (
+    <>
       <RoomNotice notice={replies.notice} onDismiss={thread.dismissNotice} />
       <RoomNotice notice={roomNotice} onDismiss={onDismissRoomNotice} />
       <MessageList
@@ -128,7 +187,7 @@ export function ThreadPanel({ room, name, me, parentId, replyId, frames, status,
           return true;
         }}
         onDropFiles={(files) => composer.current?.addFiles(files)}
-        thread={{ header: <ThreadParent parent={parent} me={me} editing={editing} actions={actions} editors={editors} place={place} />, place }}
+        thread={{ header: intro ?? <ThreadParent parent={parent} me={me} editing={editing} actions={actions} editors={editors} place={place} />, place }}
       />
       {deleted ? (
         <RoomDeleted />
@@ -147,10 +206,15 @@ export function ThreadPanel({ room, name, me, parentId, replyId, frames, status,
             onSendFiles={(files, alsoSend) => void thread.postFiles(files, alsoSend)}
             onTyping={ignore}
             onEditLastMessage={editLastReply}
+            autoFocus={autoFocus}
+            mentionsAbove={mentionsAbove}
+            commands={commands}
+            onCommand={onCommand}
+            scheduling={scheduling}
           />
         )
       )}
-    </aside>
+    </>
   );
 }
 

@@ -18,15 +18,21 @@ const overflow = (page: Page) => page.evaluate(() => document.documentElement.sc
 const slidIn = (drawer: Locator) => drawer.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
 
 test.describe("Workspace layout", () => {
-  test("puts the rail, the conversations and the room side by side on a desktop", async ({ members }) => {
+  test("puts the top bar over the rail, the conversations and the room, side by side on a desktop", async ({ members }) => {
     const ada = await members.signIn("Ada", { context: { viewport: { width: 1280, height: 800 } } });
+    const bar = ada.page.getByRole("banner");
     const rail = ada.page.getByRole("navigation", { name: "Workspace" });
     const rooms = ada.page.getByRole("region", { name: "Rooms" });
     const header = ada.page.getByRole("navigation", { name: "Page" });
 
-    expect(await box(rail)).toMatchObject({ x: 0, width: 80, height: 800 });
-    expect(await box(ada.page.getByRole("complementary", { name: "Conversations" }))).toMatchObject({ x: 80, width: 280, height: 800 });
-    expect(await box(header)).toMatchObject({ x: 360, y: 0, height: 60, width: 920 });
+    expect(await box(bar)).toMatchObject({ x: 0, y: 0, width: 1280, height: 44 });
+    expect(await box(rail)).toMatchObject({ x: 0, y: 44, width: 80, height: 756 });
+    expect(await box(ada.page.getByRole("complementary", { name: "Conversations" }))).toMatchObject({ x: 80, y: 44, width: 280, height: 756 });
+    expect(await box(header)).toMatchObject({ x: 360, y: 44, height: 60, width: 920 });
+    // Back, Forward and History end 12px short of the conversations' edge, and the search field fills the room's column but 12px.
+    const history = await box(bar.getByRole("button", { name: "History" }));
+    expect(history.x + history.width).toBe(348);
+    expect(await box(bar.getByRole("button", { name: /^Search / }))).toMatchObject({ x: 360, y: 7, width: 908, height: 30 });
     expect(await sides(header)).toEqual(["22px", "22px"]);
     const roomsBox = await box(rooms);
     expect(roomsBox.x).toBeGreaterThan(80);
@@ -47,10 +53,12 @@ test.describe("Workspace layout", () => {
     const conversations = ada.page.getByRole("complementary", { name: "Conversations" });
     const header = ada.page.getByRole("navigation", { name: "Page" });
     const composer = ada.page.locator("footer").filter({ has: ada.composer() });
+    const search = ada.page.getByRole("banner").getByRole("button", { name: /^Search / });
     for (const width of [1100, 1000, 901]) {
       await ada.page.setViewportSize({ width, height: 700 });
       expect(await box(conversations), `${width}px`).toMatchObject({ x: 80, width: 230 });
       expect(await box(header), `${width}px`).toMatchObject({ x: 310, width: width - 310 });
+      expect(await box(search), `${width}px`).toMatchObject({ x: 310, width: width - 322 });
       expect(await sides(header)).toEqual(["18px", "18px"]);
       expect(await sides(conversations.locator(":scope > div"))).toEqual(["8px", "8px"]);
       expect(await sides(composer)).toEqual(["16px", "16px"]);
@@ -73,6 +81,7 @@ test.describe("Workspace layout", () => {
 
   test("scrolls a long page's content but never the layout around it, also when the address's fragment changes", async ({ members }) => {
     const ada = await members.signIn("Ada", { administrator: true, context: { viewport: { width: 1280, height: 800 } } });
+    const bar = ada.page.getByRole("banner");
     const header = ada.page.getByRole("navigation", { name: "Page" });
     const main = ada.page.getByRole("main");
     const membership = ada.page.getByRole("region", { name: "Membership" });
@@ -87,11 +96,13 @@ test.describe("Workspace layout", () => {
       await ada.page.goto(path);
       await expect(shown).toBeAttached();
       await ada.page.evaluate(() => window.scrollBy(0, 400));
-      expect(await box(header), path).toMatchObject({ y: 0 });
+      expect(await box(bar), path).toMatchObject({ y: 0 });
+      expect(await box(header), path).toMatchObject({ y: 44 });
       await main.hover();
       await ada.page.mouse.wheel(0, 400);
       await expect.poll(() => main.evaluate((element) => element.scrollTop), { message: path }).toBeGreaterThan(0);
-      expect(await box(header), path).toMatchObject({ y: 0 });
+      expect(await box(bar), path).toMatchObject({ y: 0 });
+      expect(await box(header), path).toMatchObject({ y: 44 });
     }
 
     // Going to another section by the address's fragment, as typing it in does, leaves the layout where it is too.
@@ -100,7 +111,8 @@ test.describe("Workspace layout", () => {
     await ada.page.evaluate(() => void (location.hash = "#membership-settings"));
     await expect(membership).toBeVisible();
     await ada.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    expect(await box(header)).toMatchObject({ y: 0 });
+    expect(await box(bar)).toMatchObject({ y: 0 });
+    expect(await box(header)).toMatchObject({ y: 44 });
   });
 
   test("uses Ember's palette and 14px text, light and dark", async ({ members }) => {
@@ -278,7 +290,7 @@ test.describe("Conversations drawer on phones", () => {
     await ada.page.getByRole("button", { name: "Open conversations" }).click();
     const drawer = ada.page.getByRole("dialog", { name: "Conversations" });
     await expect(drawer).toBeVisible();
-    const controls = await drawer.locator("a, button").all();
+    const controls = await drawer.locator("a, button").filter({ visible: true }).all();
     expect(controls.length).toBeGreaterThan(0);
     for (const control of controls) {
       const name = (await control.getAttribute("aria-label")) ?? (await control.innerText());
@@ -288,7 +300,7 @@ test.describe("Conversations drawer on phones", () => {
 });
 
 test.describe("Landmarks and names", () => {
-  test("starts Tab at Skip to main content, shown under the header's start, which focuses the main content", async ({ members, rooms }) => {
+  test("starts Tab at Skip to main content, shown under the page header's start, which focuses the main content", async ({ members, rooms }) => {
     // The composer takes focus as its editor's code arrives, unless you've moved it, so Tab would start there
     // when the code came first. Holding the code until Tab has moved focus keeps that from racing the test.
     let release!: () => void;
@@ -309,7 +321,7 @@ test.describe("Landmarks and names", () => {
     release();
     await expect(ada.composer()).toBeVisible();
     await expect(skip).toBeFocused();
-    expect(await box(skip)).toMatchObject({ y: 64 });
+    expect(await box(skip)).toMatchObject({ y: 108 });
     await expect(skip).toBeInViewport({ ratio: 1 });
 
     await ada.page.keyboard.press("Enter");
@@ -330,10 +342,11 @@ test.describe("Community settings page", () => {
     const membership = links.getByRole("link", { name: "Membership" });
     const [icon, label] = [membership.locator("svg"), membership.getByText("Membership")];
 
-    // Where the conversations would be, under the header, which spans both.
-    expect(await box(page.getByRole("navigation", { name: "Page" }))).toMatchObject({ x: 80, y: 0, width: 1200, height: 60 });
-    expect(await box(links)).toMatchObject({ x: 80, y: 60, width: 244, height: 740 });
-    expect(await box(page.getByRole("main"))).toMatchObject({ x: 324, y: 60, width: 956 });
+    // Where the conversations would be, under the header, which spans both, under the top bar, whose search field starts past them.
+    expect(await box(page.getByRole("navigation", { name: "Page" }))).toMatchObject({ x: 80, y: 44, width: 1200, height: 60 });
+    expect(await box(links)).toMatchObject({ x: 80, y: 104, width: 244, height: 696 });
+    expect(await box(page.getByRole("main"))).toMatchObject({ x: 324, y: 104, width: 956 });
+    expect(await box(page.getByRole("banner").getByRole("button", { name: /^Search / }))).toMatchObject({ x: 324, y: 7 });
 
     for (const width of [900, 501, 500, 320]) {
       await page.setViewportSize({ width, height: 800 });

@@ -41,7 +41,7 @@ test.describe("Light, dark or system appearance", () => {
     await expect(menu).toBeHidden();
     await expect(button).toBeFocused();
 
-    // Tab closes it and goes on from the button: on to your profile, or back to Workspace.
+    // Tab closes it and goes on from the button: on to your profile, or back to Pause notifications.
     await ada.page.keyboard.press("Enter");
     await expect(menu.getByRole("radio", { name: "Dark" })).toBeFocused();
     await ada.page.keyboard.press("Tab");
@@ -52,7 +52,7 @@ test.describe("Light, dark or system appearance", () => {
     await expect(menu).toBeVisible();
     await ada.page.keyboard.press("Shift+Tab");
     await expect(menu).toBeHidden();
-    await expect(ada.page.getByRole("link", { name: "Workspace" })).toBeFocused();
+    await expect(ada.page.getByRole("button", { name: "Pause notifications" })).toBeFocused();
   });
 
   test("fits a phone, where Escape closes it before the drawer it's in", async ({ members }) => {

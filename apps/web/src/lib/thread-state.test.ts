@@ -1,4 +1,4 @@
-import type { Boost, Message, ServerFrame, User } from "@ember/protocol";
+import type { Boost, EphemeralMessage, Message, ServerFrame, User } from "@ember/protocol";
 import { describe, expect, it } from "vitest";
 import { isPending, type PendingMessage } from "./room-state";
 import { initialThreadState, threadReducer, type ThreadState } from "./thread-state";
@@ -97,6 +97,16 @@ describe("Open a thread", () => {
     expect(frame(state, { type: "typing", user: ada, typing: true })).toBe(state);
     expect(frame(state, { type: "typing", user: ada, typing: true, threadId: "m9" })).toBe(state);
   });
+
+  it("has its message once the room writes it, as a huddle's thread can be open before its message is there, and as the room tells of it again", () => {
+    const without = opened(initialThreadState({ parentId: "m1" }), [], { of: null });
+    const written = frame(without, { type: "message.created", message: parent, seq: 1 });
+    expect(written.parent).toEqual(parent);
+    expect(written.replies).toBe(without.replies);
+
+    const told = message({ updatedAt: "2026-10-12T10:05:00.000Z" });
+    expect(frame(written, { type: "message.created", message: told, seq: 2 }).parent).toEqual(told);
+  });
 });
 
 describe("Follow a thread as it changes", () => {
@@ -109,6 +119,9 @@ describe("Follow a thread as it changes", () => {
     expect(frame(typing, { type: "typing", user: ember, typing: false, threadId: "m1" }).replies.typing).toEqual({});
     expect(threadReducer(typing, { type: "expire-typing", before: 1_000 })).toBe(typing);
     expect(threadReducer(typing, { type: "expire-typing", before: 2_000 }).replies.typing).toEqual({});
+    // What it says it's doing meanwhile goes with it.
+    const using = threadReducer(state, { type: "frame", frame: { type: "typing", user: ember, typing: true, threadId: "m1", doing: "is searching this room" }, now: 1_000 });
+    expect(using.replies.typing).toEqual({ ember: { user: ember, at: 1_000, doing: "is searching this room" } });
   });
 
   it("adds new replies, and changes or takes away those that change or go", () => {
@@ -226,5 +239,44 @@ describe("Reply in a thread", () => {
   it("brings back a reaction the room wouldn't take away, as the room does", () => {
     const state = frame(opened(initialThreadState({ parentId: "m1" }), [reply("r1")]), { type: "error", message: "Not removed", failed: "boost.delete" });
     expect(state.replies.refusedUnboosts).toBe(1);
+  });
+});
+
+describe("Messages only you see in a thread", () => {
+  /** The card of a call that waits on Ada, which only she sees, about what she asked in m1's thread. */
+  const card = (overrides: Partial<EphemeralMessage> = {}): EphemeralMessage => ({
+    id: "e1",
+    roomId: "general",
+    creator: { id: "ember", name: "Ember" },
+    body: "",
+    plainText: "Ember wants to use Tracker",
+    cards: [],
+    createdAt: "2026-10-12T10:00:30.000Z",
+    parentId: "m1",
+    ...overrides,
+  });
+
+  it("shows those of its own questions among its replies, as they come and change, and leaves the room's and other threads' to them", () => {
+    let state = opened(initialThreadState({ parentId: "m1" }), [reply("r1")]);
+    state = frame(state, { type: "message.ephemeral", message: card() });
+    state = frame(state, { type: "message.ephemeral", message: card({ plainText: "Allowed by you." }) });
+    expect(state.replies.ephemeral.map((m) => m.plainText)).toEqual(["Allowed by you."]);
+    // The new one came as a reply does, but not its change.
+    expect(state.replies.arrivals).toBe(1);
+    for (const elsewhere of [card({ id: "e2", parentId: undefined }), card({ id: "e3", parentId: "m9" })]) expect(frame(state, { type: "message.ephemeral", message: elsewhere })).toBe(state);
+  });
+
+  it("opens with those still waiting, and opened again takes them in the place of those it showed", () => {
+    const first = frame(initialThreadState({ parentId: "m1" }), { type: "thread.opened", parentId: "m1", parent, messages: [reply("r1")], hasMore: false, ephemeral: [card()] });
+    expect(first.replies.ephemeral).toEqual([card()]);
+    let state = frame(first, { type: "message.ephemeral", message: card({ id: "e2" }) });
+    // The room's own welcome is the room's: the thread opens again after it.
+    state = frame(state, { type: "welcome", you: ada, messages: [], present: [ada], hasMore: false, hasNewer: false, around: null, seq: 1 });
+    expect(state.replies.ephemeral).toHaveLength(2);
+    expect(frame(state, { type: "thread.opened", parentId: "m1", parent, messages: [reply("r1")], hasMore: false, ephemeral: [card({ id: "e2" })] }).replies.ephemeral).toEqual([card({ id: "e2" })]);
+    expect(opened(state, [reply("r1")]).replies.ephemeral).toEqual([]);
+    // As when the replies it showed go back further than the newest page, which takes their place.
+    const paged = frame(state, { type: "thread.opened", parentId: "m1", parent, messages: [reply("r2")], hasMore: true, ephemeral: [card({ id: "e2" })] });
+    expect([paged.replies.ephemeral, paged.replies.messages.map((m) => m.id)]).toEqual([[card({ id: "e2" })], ["r2"]]);
   });
 });

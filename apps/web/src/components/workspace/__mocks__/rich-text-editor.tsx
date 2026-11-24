@@ -1,5 +1,6 @@
-import { bodyFromPlainText, writtenBody } from "@ember/richtext/dom";
-import { createElement, useEffect, useEffectEvent, useImperativeHandle, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { bodyFromPlainText, MENTION_CONTENT_TYPE, writtenBody } from "@ember/richtext/dom";
+import { createElement, Fragment, useEffect, useEffectEvent, useImperativeHandle, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { PLAIN_TEXT, type FormattingCommand, type TextFormat } from "@/lib/formatting";
 import type Editor from "../rich-text-editor";
 
 /** What Lexxy holds while nothing's written. */
@@ -14,6 +15,30 @@ interface Attachment {
   html: string;
 }
 
+/** The formatting a command leaves, as Lexxy would leave it where the cursor is. */
+function formatAfter(format: TextFormat, command: FormattingCommand): TextFormat {
+  switch (command) {
+    case "paragraph":
+      return { ...format, heading: null };
+    case "h1":
+    case "h2":
+    case "h3":
+      return { ...format, heading: command };
+    case "orderedList":
+      return { ...format, list: format.list === "ordered" ? null : "ordered" };
+    case "bulletedList":
+      return { ...format, list: format.list === "bulleted" ? null : "bulleted" };
+    case "divider":
+      return format;
+    default:
+      return { ...format, [command]: !format[command] };
+  }
+}
+
+/** Lexxy's markup for `text`, where @here, @channel and @everyone, typed as words, are the mentions picking them from @'s list writes. */
+const markupOf = (text: string) =>
+  bodyFromPlainText(text).replace(/(?<![\w.@])@(here|channel|everyone)(?![\w-])/g, (_, name: string) => `<action-text-attachment sgid="${name}" content-type="${MENTION_CONTENT_TYPE}"></action-text-attachment>`);
+
 const attachmentMarkup = ({ contentType, html }: Attachment) =>
   `<action-text-attachment content="${html.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")}" content-type="${contentType}"></action-text-attachment>`;
 
@@ -21,9 +46,31 @@ const attachmentMarkup = ({ contentType, html }: Attachment) =>
  * Lexxy's stand-in in unit tests, which test-setup.ts swaps in because Lexxy doesn't keep what's
  * written under jsdom: a text box whose lines are one paragraph of Lexxy's markup, which tells of
  * changes and keys as the editor does, and of addresses pasted in it, below which it shows what's
- * added. The browser tests in e2e/ write in Lexxy itself.
+ * added, each with Lexxy's Remove button. Formatting changes only the formatting it tells of, and a
+ * link only the text, which it marks `data-linked` with the address. It lists nobody for an @, though
+ * @here, @channel and @everyone typed as words are written as the mentions picked from the list, and is
+ * marked `data-mentions-from` with where the list would ask for them and `data-mentions-above` where
+ * the list is to show above the text. Nor does it list rooms for a #, marking itself `data-rooms` with
+ * the ids of the rooms the list would offer, in order. It names the commands a / would list in
+ * `data-commands`. The browser tests in e2e/ write in Lexxy itself.
  */
-export default function RichTextEditor({ label, placeholder, rows, initialValue, autoFocus, onChange, onKeyDown, onLinkPasted, ref }: ComponentProps<typeof Editor>) {
+export default function RichTextEditor({
+  label,
+  placeholder,
+  rows,
+  initialValue,
+  mentionsFrom,
+  rooms,
+  mentionsAbove,
+  commands,
+  autoFocus,
+  onChange,
+  onFormatChange,
+  onKeyDown,
+  onLinkPasted,
+  onReady,
+  ref,
+}: ComponentProps<typeof Editor>) {
   const box = useRef<HTMLTextAreaElement>(null);
   // Read as soon as they change, as Lexxy's are, and shown once React renders them.
   const attachments = useRef<Attachment[]>([]);
@@ -32,9 +79,14 @@ export default function RichTextEditor({ label, placeholder, rows, initialValue,
     attachments.current = added;
     show(added);
   };
+  const format = useRef(PLAIN_TEXT);
+  const formatted = (next: TextFormat) => {
+    format.current = next;
+    onFormatChange?.(next);
+  };
 
   useImperativeHandle(ref, () => ({
-    value: () => (box.current?.value ? bodyFromPlainText(box.current.value) : EMPTY) + attachments.current.map(attachmentMarkup).join(""),
+    value: () => (box.current?.value ? markupOf(box.current.value) : EMPTY) + attachments.current.map(attachmentMarkup).join(""),
     clear: () => {
       if (!box.current?.value && attachments.current.length === 0) return;
       box.current!.value = "";
@@ -52,6 +104,41 @@ export default function RichTextEditor({ label, placeholder, rows, initialValue,
       text.focus();
       text.setSelectionRange(text.value.length, text.value.length);
     },
+    apply: (command) => formatted(formatAfter(format.current, command)),
+    linkDraft: () => {
+      const text = box.current!;
+      return { text: text.value.slice(text.selectionStart, text.selectionEnd), url: text.dataset.linked ?? "" };
+    },
+    link: ({ text, url }) => {
+      box.current!.setRangeText(text, box.current!.selectionStart, box.current!.selectionEnd, "end");
+      box.current!.dataset.linked = url;
+      formatted({ ...format.current, link: true });
+      onChange?.();
+    },
+    unlink: () => {
+      delete box.current!.dataset.linked;
+      formatted({ ...format.current, link: false });
+    },
+    insertText: (inserted) => {
+      box.current!.setRangeText(inserted, box.current!.selectionStart, box.current!.selectionEnd, "end");
+      onChange?.();
+    },
+    startMention: () => {
+      const text = box.current!;
+      text.focus();
+      const before = text.value.slice(0, text.selectionStart);
+      text.setRangeText(/\S$/.test(before) ? " @" : "@", text.selectionStart, text.selectionEnd, "end");
+      onChange?.();
+    },
+    startCommand: () => {
+      const text = box.current!;
+      text.focus();
+      text.value = text.value.trim() ? `/ ${text.value}` : "/";
+      text.setSelectionRange(1, 1);
+      onChange?.();
+    },
+    startNewBlock: () => false,
+    catchUp: () => {},
   }));
 
   const keyPressed = useEffectEvent((event: KeyboardEvent) => onKeyDown?.(event));
@@ -63,13 +150,19 @@ export default function RichTextEditor({ label, placeholder, rows, initialValue,
     return () => text.removeEventListener("keydown", listener, { capture: true });
   }, []);
 
-  // As it shows, rather than once React gets round to effects, so a test finds it focused when it finds it.
+  // As it shows, rather than once React gets round to effects, so a test finds it ready, and focused, when it finds it.
   useLayoutEffect(() => {
+    onReady?.();
     if (!(typeof autoFocus === "function" ? autoFocus() : autoFocus)) return;
     const text = box.current!;
     text.focus();
     text.setSelectionRange(text.value.length, text.value.length);
   }, []);
+
+  const remove = (removed: Attachment) => {
+    attach(attachments.current.filter((attachment) => attachment !== removed));
+    onChange?.();
+  };
 
   const pasted = (text: string) => {
     const url = text.trim();
@@ -90,13 +183,20 @@ export default function RichTextEditor({ label, placeholder, rows, initialValue,
         aria-label={label}
         placeholder={placeholder}
         rows={rows}
+        data-mentions-from={mentionsFrom}
+        data-rooms={rooms === undefined ? undefined : [...(rooms?.keys() ?? [])].join(" ")}
+        data-mentions-above={mentionsAbove || undefined}
+        data-commands={commands?.map(({ name }) => name).join(" ")}
         defaultValue={initialValue && writtenBody(initialValue).plainText}
         onChange={() => onChange?.()}
         onPaste={(event) => pasted(event.clipboardData.getData("text/plain"))}
       />
-      {shown.map(({ contentType, html }, index) =>
-        createElement("action-text-attachment", { key: index, "content-type": contentType, dangerouslySetInnerHTML: { __html: html } }),
-      )}
+      {shown.map((attachment, index) => (
+        <Fragment key={index}>
+          {createElement("action-text-attachment", { "content-type": attachment.contentType, dangerouslySetInnerHTML: { __html: attachment.html } })}
+          <button type="button" aria-label="Remove" onClick={() => remove(attachment)} />
+        </Fragment>
+      ))}
     </>
   );
 }

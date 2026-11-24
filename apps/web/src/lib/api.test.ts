@@ -3,18 +3,27 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   changeAvatar,
+  changeBlock,
   changeRoom,
   createRoom,
+  createSection,
+  deleteSection,
   fetchMe,
   fetchNewRoomForm,
   fetchRoomSettings,
   fetchSidebar,
   forgetStoredSession,
+  handleReport,
   joinWorkspace,
+  listReports,
   removeAvatar,
+  renameSection,
+  reportMessage,
+  reportPerson,
   roomSocketUrl,
   setFavorite,
   setFavoriteOrder,
+  setSharedOrder,
   setUpWorkspace,
   signOut,
   workspaceSocketUrl,
@@ -109,7 +118,7 @@ describe("Installer-protected setup link", () => {
 
 describe("Upload an avatar", () => {
   it("changes your avatar with a form of the photo and its variant, and removes it", async () => {
-    const answer = { profile: { name: "Ada", emailAddress: null, bio: null, avatarUrl: "/users/t/avatar", avatar: true, password: false, membershipNeeded: true, memberful: null, assistant: null }, transferId: "u1.t" } satisfies ProfileAnswer;
+    const answer = { profile: { name: "Ada", username: null, emailAddress: null, bio: null, avatarUrl: "/users/t/avatar", avatar: true, password: false, membershipNeeded: true, memberful: null, sso: null, assistant: null, apps: [], outsideAi: null }, transferId: "u1.t" } satisfies ProfileAnswer;
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json(answer));
     const file = new File(["ada"], "ada.jpg", { type: "image/jpeg" });
     expect(await changeAvatar({ file, variant: new Blob(["variant"], { type: "image/webp" }) })).toEqual(answer);
@@ -139,24 +148,31 @@ describe("Sign out", () => {
 
 describe("Connection sign-in and revocation", () => {
   it("opens room sockets at the room's own address, over wss on https pages", () => {
-    expect(roomSocketUrl("general", { visible: true })).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=4");
+    expect(roomSocketUrl("general", { visible: true })).toBe("ws://localhost:3000/api/rooms/general/socket?visible=1&protocol=5");
     vi.stubGlobal("location", new URL("https://ember.example/rooms/general"));
-    expect(roomSocketUrl("general", { visible: false })).toBe("wss://ember.example/api/rooms/general/socket?visible=0&protocol=4");
+    expect(roomSocketUrl("general", { visible: false })).toBe("wss://ember.example/api/rooms/general/socket?visible=0&protocol=5");
     vi.unstubAllGlobals();
   });
 });
 
 describe("One live connection per tab outside the open room", () => {
-  it("opens the workspace socket on the page's own host, over wss on https pages", () => {
-    expect(workspaceSocketUrl()).toBe("ws://localhost:3000/api/socket");
+  it("opens the workspace socket on the page's own host, over wss on https pages, saying whether the tab is shown", () => {
+    expect(workspaceSocketUrl({ visible: true })).toBe("ws://localhost:3000/api/socket?visible=1");
     vi.stubGlobal("location", new URL("https://ember.example/rooms/general"));
-    expect(workspaceSocketUrl()).toBe("wss://ember.example/api/socket");
+    expect(workspaceSocketUrl({ visible: false })).toBe("wss://ember.example/api/socket?visible=0");
     vi.unstubAllGlobals();
   });
 });
 
 describe("Live sidebar updates", () => {
-  const sidebar: Sidebar = { rooms: [{ id: "r1", name: "Design", kind: "open", icon: null, unread: false, involvement: "mentions" }], favorites: { rooms: [], version: 0 }, sharedOrder: [], invitation: null, suggestions: [], huddles: {} };
+  const sidebar: Sidebar = {
+    rooms: [{ id: "r1", name: "Design", kind: "open", icon: null, unread: false, involvement: "mentions" }],
+    favorites: { rooms: [], version: 0 },
+    sharedOrder: [],
+    invitation: null,
+    huddles: {},
+    blocks: { userIds: [], version: 0 },
+  };
 
   it("keeps the sidebar's ETag, and names it to keep the copy while it's current", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json(sidebar, { headers: { ETag: 'W/"abc"' } }));
@@ -196,6 +212,63 @@ describe("Reorder starred rooms", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ favorites }));
     expect(await setFavoriteOrder(["r2", "r1"])).toEqual(favorites);
     expect(fetch).toHaveBeenLastCalledWith("/api/sidebar/order", expect.objectContaining({ method: "PUT", body: JSON.stringify({ roomIds: ["r2", "r1"] }) }));
+  });
+});
+
+describe("Sidebar sections", () => {
+  it("lays out the shared order with its sections, and makes, renames and deletes a section by its id, escaped", async () => {
+    const layout = { roomIds: ["r1", "r2"], sections: [{ id: "s1", roomIds: ["r2"] }] };
+    const saved = { sharedOrder: ["r1", "r2"], sections: [{ id: "s1", name: "Engineering", roomIds: ["r2"] }] };
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json(saved));
+    expect(await setSharedOrder(layout)).toEqual(saved);
+    expect(fetch).toHaveBeenLastCalledWith("/api/account/room_order", expect.objectContaining({ method: "PUT", body: JSON.stringify(layout) }));
+
+    fetch.mockResolvedValueOnce(Response.json({ section: { id: "s 2", name: "Sales" } }, { status: 201 }));
+    expect(await createSection("Sales")).toEqual({ id: "s 2", name: "Sales" });
+    expect(fetch).toHaveBeenLastCalledWith("/api/account/sections", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "Sales" }) }));
+    fetch.mockResolvedValueOnce(Response.json({ section: { id: "s 2", name: "Revenue" } }));
+    expect(await renameSection("s 2", "Revenue")).toEqual({ id: "s 2", name: "Revenue" });
+    expect(fetch).toHaveBeenLastCalledWith("/api/account/sections/s%202", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ name: "Revenue" }) }));
+    fetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await deleteSection("s 2");
+    expect(fetch).toHaveBeenLastCalledWith("/api/account/sections/s%202", expect.objectContaining({ method: "DELETE" }));
+
+    fetch.mockResolvedValueOnce(Response.json({ error: "There's a section with that name already" }, { status: 409 }));
+    await expect(createSection("sales")).rejects.toMatchObject({ status: 409, message: "There's a section with that name already" });
+  });
+});
+
+describe("Block someone", () => {
+  it("blocks someone, or unblocks them, answering whom you've blocked and your DM with them", async () => {
+    const changed = { blocks: { userIds: ["u 2"], version: 4 }, direct: { roomId: "d1", involvement: "invisible" as const } };
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(changed));
+    expect(await changeBlock("u 2", true)).toEqual(changed);
+    expect(fetch).toHaveBeenLastCalledWith("/api/users/u%202/block", expect.objectContaining({ method: "POST" }));
+    await changeBlock("u 2", false);
+    expect(fetch).toHaveBeenLastCalledWith("/api/users/u%202/block", expect.objectContaining({ method: "DELETE" }));
+  });
+});
+
+describe("Report a message or someone", () => {
+  it("reports a message in its room, or someone, saying why", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(null, { status: 204 }));
+    await reportMessage("r1", "m 1", { reason: "spam", note: "Again" });
+    expect(fetch).toHaveBeenLastCalledWith("/api/rooms/r1/messages/m%201/report", expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "spam", note: "Again" }) }));
+    await reportPerson("u 2", { reason: "other", note: "" });
+    expect(fetch).toHaveBeenLastCalledWith("/api/users/u%202/report", expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "other", note: "" }) }));
+  });
+
+  it("lists the reports for an administrator, and handles one, answering the reports that closed", async () => {
+    const report = { id: "rep 1", reporterId: "u2", reason: "spam", note: "", reportedAt: "2026-11-18T00:00:00.000Z", subject: { kind: "person", person: { id: "u3", name: "Grace", bio: null } }, handled: null };
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({ open: [report], handled: [] }));
+    expect(await listReports()).toEqual({ open: [report], handled: [] });
+    expect(fetch).toHaveBeenLastCalledWith("/api/reports", expect.anything());
+    const handled = { ...report, handled: { by: "u1", at: "2026-11-18T00:01:00.000Z", outcome: "dismissed" } };
+    fetch.mockResolvedValueOnce(Response.json({ reports: [handled] }));
+    expect(await handleReport("rep 1", "dismissed")).toEqual([handled]);
+    expect(fetch).toHaveBeenLastCalledWith("/api/reports/rep%201", expect.objectContaining({ method: "POST", body: JSON.stringify({ outcome: "dismissed" }) }));
+    fetch.mockResolvedValueOnce(Response.json({ error: "Another administrator has handled that report" }, { status: 409 }));
+    await expect(handleReport("rep 1", "deleted")).rejects.toMatchObject({ status: 409, message: "Another administrator has handled that report" });
   });
 });
 

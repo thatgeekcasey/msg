@@ -14,7 +14,7 @@ test("an empty room fits the phone", async ({ page, room, screenIsFine }) => {
 });
 
 test("the page for someone in no rooms fits the phone", async ({ page, screenIsFine }) => {
-  await page.route("**/api/sidebar", (route) => route.fulfill({ json: { rooms: [], favorites: { rooms: [], version: 0 }, sharedOrder: [], invitation: null, suggestions: [], huddles: {} } satisfies Sidebar }));
+  await page.route("**/api/sidebar", (route) => route.fulfill({ json: { rooms: [], favorites: { rooms: [], version: 0 }, sharedOrder: [], invitation: null, huddles: {}, blocks: { userIds: [], version: 0 } } satisfies Sidebar }));
   await keepOtherRoomsOut(page, []);
   await page.goto("/");
   await expect(page).toHaveTitle("No rooms yet");
@@ -123,4 +123,23 @@ test("the rail's appearance menu fits the phone", async ({ page, room, screenIsF
   await screenIsFine();
   await menu.getByText("Dark", { exact: true }).tap();
   await expect(page.locator("html")).toHaveClass(/dark/);
+});
+
+test("the rail's Pause notifications menu fits the phone", async ({ page, room, screenIsFine }) => {
+  await openRoom(page, room);
+  const rail = page.getByRole("navigation", { name: "Workspace" });
+  if (hasDrawerLayout(page)) {
+    await page.getByRole("button", { name: "Open conversations" }).tap();
+    await settle(page);
+  }
+
+  // From the bottom of the screen, as the appearance menu's test starts, where the rail scrolls.
+  const pause = rail.getByRole("button", { name: "Pause notifications" });
+  await pause.evaluate((button) => button.scrollIntoView({ block: "end" }));
+  await pause.tap();
+  const menu = page.getByRole("menu", { name: "Pause notifications" });
+  await expect(menu.getByRole("menuitem")).toHaveText(["30 minutes", "1 hour", "2 hours", "Until tomorrow"]);
+  await screenIsFine();
+  await menu.getByRole("menuitem", { name: "30 minutes" }).tap();
+  await expect(rail.getByRole("button", { name: /^Notifications paused until / })).toBeVisible();
 });

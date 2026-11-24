@@ -1,5 +1,5 @@
 import type { Boost, Message, ServerFrame } from "@ember/protocol";
-import { initialRoomState, isPending, paged, resumed, roomReducer, typed, welcomed, type RoomAction, type RoomState } from "./room-state";
+import { initialRoomState, isPending, paged, resumed, roomReducer, withEphemeral, typed, welcomed, type RoomAction, type RoomState } from "./room-state";
 
 /**
  * A thread as its panel shows it: the message it's for, its parent, and its replies, a timeline of their
@@ -35,11 +35,11 @@ const withBoosts = (message: Message, boosts: Boost[]): Message => ({ ...message
  * been deleted. Once they go back further, the page can't say what came, changed or went before it, so it
  * takes their place, as when the thread first opened, and paging back brings the older ones as they are.
  */
-function reopened(replies: RoomState, { messages, hasMore }: Extract<ServerFrame, { type: "thread.opened" }>): RoomState {
+function reopened(replies: RoomState, { messages, hasMore, ephemeral }: Extract<ServerFrame, { type: "thread.opened" }>): RoomState {
   const shown = replies.messages.filter((m) => !isPending(m));
-  if (hasMore && (shown.length === 0 || shown[0]!.id < messages[0]!.id)) return welcomed(replies, { messages, hasMore, hasNewer: false, around: null }, []);
+  if (hasMore && (shown.length === 0 || shown[0]!.id < messages[0]!.id)) return welcomed(replies, { messages, hasMore, hasNewer: false, around: null }, [], ephemeral);
   const kept = new Set(messages.map((m) => m.id));
-  return resumed(replies, { messages, deletedIds: shown.flatMap((m) => (kept.has(m.id) ? [] : [m.id])) }, []);
+  return resumed(replies, { messages, deletedIds: shown.flatMap((m) => (kept.has(m.id) ? [] : [m.id])) }, [], ephemeral);
 }
 
 /**
@@ -76,11 +76,13 @@ export function threadReducer(state: ThreadState, action: ThreadAction): ThreadS
       // time after, as the room lets the page in again, the reader keeps their place, when the page can.
       if (state.replies.connections > 0) return opening({ ...state, parent: frame.parent, replies: reopened(state.replies, frame) });
       const page = { messages: frame.messages, hasMore: frame.hasMore, hasNewer: false, around: null };
-      return opening({ ...state, parent: frame.parent, replies: welcomed(state.replies, page, []) });
+      return opening({ ...state, parent: frame.parent, replies: welcomed(state.replies, page, [], frame.ephemeral) });
     }
     case "thread.history":
       return frame.parentId === parentId ? opening(withReplies(paged(state.replies, frame))) : state;
     case "message.created":
+      // A thread can be open before the room has written its message, as a huddle's is that shows it from its start.
+      if (frame.message.id === parentId) return { ...state, parent: frame.message };
       return frame.message.parentId === parentId ? withReplies(roomReducer(state.replies, action)) : state;
     case "message.updated":
       return frame.message.id === parentId ? { ...state, parent: frame.message } : withReplies(roomReducer(state.replies, action));
@@ -96,6 +98,9 @@ export function threadReducer(state: ThreadState, action: ThreadAction): ThreadS
         : withReplies(roomReducer(state.replies, action));
     case "message.checked":
       return withReplies(roomReducer(state.replies, action));
+    // Those of the thread's questions that still wait come again with `thread.opened`, in the place of those it showed.
+    case "message.ephemeral":
+      return frame.message.parentId === parentId ? withReplies(withEphemeral(state.replies, frame.message)) : state;
     case "typing":
       return frame.threadId === parentId ? withReplies({ ...state.replies, typing: typed(state.replies.typing, frame, action.now) }) : state;
     case "error": {

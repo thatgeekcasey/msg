@@ -41,6 +41,8 @@ interface Options {
   holdMs: number;
   /** Whether a press on `target` picks up the row it's in. Anywhere in the row does, unless this says otherwise. */
   grabs?: (target: Element) => boolean;
+  /** Where on the screen a row dragged goes past `row`: its middle, unless this says otherwise. */
+  middleOf?: (row: HTMLElement) => number;
   /** Whether the rows stay where they are for now, as while an order saves. */
   isLocked: () => boolean;
   /** Called as a row starts being dragged. */
@@ -58,6 +60,11 @@ const sameOrder = (a: RoomId[], b: RoomId[] | null) => b !== null && a.length ==
 
 const anywhere = () => true;
 
+const middle = (row: HTMLElement) => {
+  const box = row.getBoundingClientRect();
+  return box.top + box.height / 2;
+};
+
 /**
  * Moves the rows of a list of rooms among themselves, by dragging one or pressing Alt and an arrow on
  * one: the sidebar's stars, and the rooms an administrator puts in order for everyone. It answers the
@@ -67,7 +74,7 @@ const anywhere = () => true;
  * The list's element takes `listRef` and `listProps`, its rows carry `data-room-id`, and the element the
  * list scrolls in takes `scrollerRef`, unless that's the list itself.
  */
-export function useRoomDrag({ order, movable, holdMs, grabs = anywhere, isLocked, onDrag, onMove, onCancel }: Options) {
+export function useRoomDrag({ order, movable, holdMs, grabs = anywhere, middleOf = middle, isLocked, onDrag, onMove, onCancel }: Options) {
   const listRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<RoomId[] | null>(null);
@@ -135,8 +142,8 @@ export function useRoomDrag({ order, movable, holdMs, grabs = anywhere, isLocked
     // The row goes before the first other one that can move whose middle is below the pointer, or after
     // the last of them.
     const before = movable.find((id) => {
-      const box = id === pressed.roomId ? undefined : rowOf(id)?.getBoundingClientRect();
-      return box !== undefined && point.clientY < box.top + box.height / 2;
+      const row = id === pressed.roomId ? null : rowOf(id);
+      return row !== null && point.clientY < middleOf(row);
     });
     const next = movedBefore(drafted.current ?? order, pressed.roomId, before ?? null);
     if (!sameOrder(next, drafted.current)) redraft(next);

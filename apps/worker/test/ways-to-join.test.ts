@@ -69,16 +69,24 @@ const account = (changes: Partial<Account> = {}): Account => ({
   hideTranslationButtons: true,
   customStyles: "",
   restrictRoomCreation: false,
+  restrictChannelMentions: false,
+  restrictEveryoneMention: false,
+  warnBeforeNotifying: true,
   logo: null,
   customDomain: null,
   joinLink: true,
   openSignUp: false,
   memberfulJoin: false,
   memberfulSignIn: false,
+  ssoJoin: false,
+  ssoSignIn: false,
   emailDomainSignUp: false,
   emailDomains: [],
   navigationIcons: {},
   huddles: false,
+  huddleCameras: true,
+  huddleScreens: true,
+  huddleVideo: "hd",
   ...changes,
 });
 
@@ -409,11 +417,14 @@ describe("Sign up without a link", () => {
       const cookie = cookieOf(response);
       expect(await (await api("/api/me", { headers: { Cookie: cookie } })).json()).toEqual({ user });
       const { rooms } = (await (await api("/api/sidebar", { headers: { Cookie: cookie } })).json()) as Sidebar;
-      expect(rooms.map((room) => room.id)).toEqual([administrator.general.id, expect.any(String), design.id]);
+      // And the DM that welcomes them, with the administrator, last.
+      const welcome = rooms.find((room) => room.kind === "direct")!;
+      expect(rooms.map((room) => room.id)).toEqual([administrator.general.id, expect.any(String), design.id, welcome.id]);
       expect(rooms.map((room) => room.id)).not.toContain(leads.id);
 
       const { users } = (await (await api("/api/users", { headers: as(administrator) })).json()) as Directory;
       expect(await workspace.next()).toEqual({ type: "user.updated", user: users.find((person) => person.id === user.id) });
+      expect(await workspace.next()).toEqual({ type: "room.saved", room: expect.objectContaining({ id: welcome.id, kind: "direct" }) });
       workspace.ws.close(1000);
     });
 
@@ -491,6 +502,11 @@ describe("Sign up without a link", () => {
       expect(await count("users")).toBe(5);
 
       expect((await signUp(newcomer(5), { ip: "198.51.100.4" })).status).toBe(201);
+
+      // An IPv6 address counts as its /64, whichever of its addresses signs up.
+      for (let n = 6; n <= 10; n++) expect((await signUp(newcomer(n), { ip: `2001:db8:1:2::${n}` })).status, `sign-up ${n}`).toBe(201);
+      expect((await signUp(newcomer(11), { ip: "2001:db8:1:2:ffff::1" })).status).toBe(429);
+      expect((await signUp(newcomer(11), { ip: "2001:db8:1:3::1" })).status).toBe(201);
     });
 
     it("starts counting an address's sign-ups again an hour after its first", async () => {

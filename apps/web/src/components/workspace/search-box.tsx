@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from "react";
 import {
   hasFilters,
   isSearchable,
@@ -25,13 +25,14 @@ import { afterNavigating, navigate, pageMark } from "@/hooks/use-route";
 import { clearSearches, fetchSearch, isSignedOut, recordSearch } from "@/lib/api";
 import { roomName } from "@/lib/directs";
 import { opensFind } from "@/lib/keyboard";
+import { safeAreaBoundary } from "@/lib/safe-area";
 import { FLAG_LABELS, keepAnswer, modifierTyped, withoutFlag, withoutFromMe, withTypedFilters, type TypedModifier } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import { returnFocus } from "./new-direct-dialog";
 import { UserAvatar } from "./user-avatar";
 
-// The search box, after Slack's: Cmd+F or Ctrl+F, or Search in the rail or a room's header, opens it over
-// the page, and a search in it opens its results (search-page.tsx).
+// The search box, after Slack's: Cmd+F or Ctrl+F, the top bar's search field, or Search in a room's header
+// opens it, over the top bar's field where that shows, and a search in it opens its results (search-page.tsx).
 
 /** What the search box opens with. */
 export interface SearchBoxOptions {
@@ -47,15 +48,15 @@ export interface SearchBoxOptions {
 
 export type OpenSearch = (options: SearchBoxOptions) => void;
 
-/** Opens the search box, for the rail, a room's header and the results page. */
+/** Opens the search box, for the top bar, a room's header and the results page. */
 export const OpenSearchContext = createContext<OpenSearch>(() => {});
 
 /** What the box and the results page ask before they clear your recent searches. */
 export const CONFIRM_CLEAR_SEARCHES = "Are you sure you want to clear your recent searches?";
 
 /**
- * A link's click that opens the search box in place, as Search does in the rail and a room's header,
- * leaving one with a modifier key to follow the link, as into a new tab.
+ * A link's click that opens the search box in place, as Search does in a room's header, leaving one
+ * with a modifier key to follow the link, as into a new tab.
  */
 export function opensSearch(open: OpenSearch, options: Omit<SearchBoxOptions, "opener"> = {}) {
   return (event: MouseEvent<HTMLAnchorElement>) => {
@@ -122,6 +123,42 @@ export function RoomMark({ room, size }: { room: Room | null; size: number }) {
       <RoomIcon icon={room?.icon ?? null} size={size} />
     </span>
   );
+}
+
+/**
+ * Where the box opens over the top bar's search field `anchor`, as Slack's grows out of its own: its
+ * field over the bar's, a little wider than it and at least 680px, 8px inside the part of the screen
+ * clear of a phone's notch and rounded corners, and as tall as that leaves it below. Null while the
+ * bar's field isn't shown, as at 900px and below, where the box opens in the middle of the screen. It
+ * follows the field as the window is resized.
+ */
+function useAnchoredPlace(anchor: RefObject<HTMLElement | null> | undefined): CSSProperties | null {
+  const [place, setPlace] = useState<CSSProperties | null>(null);
+  // Placed before the box first paints.
+  useLayoutEffect(() => {
+    const placeOver = () => setPlace(anchoredPlace(anchor?.current ?? null));
+    placeOver();
+    window.addEventListener("resize", placeOver);
+    return () => window.removeEventListener("resize", placeOver);
+  }, [anchor]);
+  return place;
+}
+
+function anchoredPlace(field: HTMLElement | null): CSSProperties | null {
+  // A field that isn't drawn has no boxes.
+  if (!field || field.getClientRects().length === 0) return null;
+  const bar = field.getBoundingClientRect();
+  const safe = safeAreaBoundary().getBoundingClientRect();
+  const width = Math.min(Math.max(bar.width + 16, 680), safe.width - 16);
+  const top = Math.max(bar.top - 6, safe.top + 4);
+  return {
+    top,
+    left: Math.min(Math.max(bar.left - 8, safe.left + 8), safe.right - width - 8),
+    width,
+    maxWidth: "none",
+    maxHeight: safe.bottom - top - 12,
+    translate: "none",
+  };
 }
 
 /** How a token looks: a small rounded box, a line of the field tall, whose name is cut short where a line is too narrow. */
@@ -238,6 +275,8 @@ function Key({ children }: { children: ReactNode }) {
 }
 
 interface Props extends SearchBoxOptions {
+  /** The top bar's search field, which it opens over while the field shows. */
+  anchor?: RefObject<HTMLElement | null>;
   me: Me;
   /** The rooms the sidebar lists, which `in:` offers and the tokens name. */
   rooms: readonly Room[];
@@ -254,8 +293,9 @@ interface Props extends SearchBoxOptions {
  * or `from:` is typed, what it can name. A search records itself as your newest and opens its results.
  * Cmd+F or Ctrl+F in the box closes it and leaves the key to the browser, which finds in the page.
  */
-export function SearchBox({ opener, search: start, sort = "newest", roomId, me, rooms, onClose, onFailed }: Props) {
+export function SearchBox({ opener, search: start, sort = "newest", roomId, anchor, me, rooms, onClose, onFailed }: Props) {
   const names = useSearchNames(me, rooms);
+  const place = useAnchoredPlace(anchor);
   const people = useContext(PeopleContext);
   const mounted = useMounted();
   const listId = useId();
@@ -421,7 +461,8 @@ export function SearchBox({ opener, search: start, sort = "newest", roomId, me, 
       <DialogContent
         data-ember-search-box
         showCloseButton={false}
-        overlayClassName="bg-dialog-backdrop"
+        // Over the top bar's field, it leaves the page undimmed, as Slack's does.
+        overlayClassName={place ? "bg-transparent" : "bg-dialog-backdrop"}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           const input = field.current;
@@ -441,6 +482,7 @@ export function SearchBox({ opener, search: start, sort = "newest", roomId, me, 
         // As tall as the screen leaves it at most, where the list gives up its height first, as on a phone on its
         // side, and wide enough for the chips on one line, In this conversation's among them.
         className="top-[max(12px,8dvh,env(safe-area-inset-top))] flex max-h-[calc(100dvh-max(12px,8dvh,env(safe-area-inset-top))-max(12px,env(safe-area-inset-bottom)))] w-[768px] max-w-[calc(100dvw-24px-env(safe-area-inset-left)-env(safe-area-inset-right))] translate-y-0 flex-col gap-0 overflow-hidden rounded-[14px] p-0 text-foreground shadow-[0_24px_80px_var(--color-dialog-shadow)] sm:max-w-[calc(100dvw-24px-env(safe-area-inset-left)-env(safe-area-inset-right))]"
+        style={place ?? undefined}
       >
         <DialogTitle className="sr-only">Search</DialogTitle>
         <DialogDescription className="sr-only">Search messages in your rooms and direct messages, or narrow a search with the filters.</DialogDescription>

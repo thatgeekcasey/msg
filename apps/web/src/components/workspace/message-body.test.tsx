@@ -1,10 +1,11 @@
 import { avatarSvg, type DirectoryUser, type User } from "@ember/protocol";
-import { displayBody, OPENGRAPH_EMBED_CONTENT_TYPE, previewContent } from "@ember/richtext/dom";
+import { displayBody, OPENGRAPH_EMBED_CONTENT_TYPE, previewContent, ROOM_MENTION_CONTENT_TYPE } from "@ember/richtext/dom";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PeopleContext, type People } from "@/hooks/use-directory";
+import { RoomsContext, type Rooms } from "@/hooks/use-rooms";
 import { marksFor } from "@/lib/search";
 import { MessageBody } from "./message-body";
 import { SearchMarks } from "./search-marks";
@@ -188,6 +189,61 @@ describe("How mentions look", () => {
   it("shows ☒ for someone no one knows, as a message from before messages named the people they mention doesn't", () => {
     expect(mention(new Map(), []).innerHTML).toBe("<p>Hi ☒!</p>");
     expect(mention(new Map(), [{ id: grace.id, name: "" }]).innerHTML).toBe("<p>Hi ☒!</p>");
+  });
+
+  it("shows @here and @channel by their names, in semibold as a person's name is in a mention of them", () => {
+    const special = (name: string) => `<action-text-attachment content-type="application/vnd.campfire.mention" sgid="${name}"></action-text-attachment>`;
+    expect(mention(new Map(), [], `<p>${special("here")} and ${special("channel")}: standup!</p>`).innerHTML).toBe(
+      '<p><span class="font-semibold">@here</span> and <span class="font-semibold">@channel</span>: standup!</p>',
+    );
+  });
+});
+
+/** A stored mention of room `roomId`. */
+const roomMention = (roomId: string) => `<action-text-attachment content-type="${ROOM_MENTION_CONTENT_TYPE}" sgid="${roomId}"></action-text-attachment>`;
+
+/** Shows `body` to someone in `rooms`, or before their sidebar has loaded, returning its content. */
+function mentioningRooms(rooms: Rooms | null, body: string) {
+  const { container } = render(
+    <RoomsContext value={rooms}>
+      <MessageBody nodes={shown(body)} mentions={[]} />
+    </RoomsContext>,
+  );
+  return container.querySelector(".message-content")!;
+}
+
+describe("How mentions of rooms look", () => {
+  const rooms: Rooms = new Map([["otters", { id: "otters", kind: "open", name: "Otter Pond", icon: null }]]);
+
+  it("names a room the reader's in after a #, linking to it, and opens it in place", async () => {
+    const content = mentioningRooms(rooms, `<p>See ${roomMention("otters")} today</p>`);
+    expect(content).toHaveTextContent("See #Otter Pond today");
+    const link = screen.getByRole("link", { name: "#Otter Pond" });
+    expect(link).toHaveAttribute("href", "/rooms/otters");
+    expect(link).not.toHaveAttribute("target");
+    await userEvent.click(link);
+    expect(location.pathname).toBe("/rooms/otters");
+  });
+
+  it("shows a room the reader isn't in as a lock and private room, linking nowhere", () => {
+    const content = mentioningRooms(rooms, `<p>See ${roomMention("secret")}</p>`);
+    expect(content).toHaveTextContent("See private room");
+    expect(content).not.toHaveTextContent("secret");
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(content.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("names the room without a link of its own inside a link, as a link can't hold another", () => {
+    mentioningRooms(rooms, `<p><a href="https://example.com">Notes from ${roomMention("otters")}</a></p>`);
+    expect(screen.getAllByRole("link")).toEqual([screen.getByRole("link", { name: "Notes from #Otter Pond" })]);
+  });
+
+  it("shows only the # until the sidebar has said which rooms the reader's in", () => {
+    expect(mentioningRooms(null, `<p>See ${roomMention("otters")}</p>`).innerHTML).toBe("<p>See #</p>");
+  });
+
+  it("shows ☒ for a mention that names no room", () => {
+    expect(mentioningRooms(rooms, `<p>See <action-text-attachment content-type="${ROOM_MENTION_CONTENT_TYPE}"></action-text-attachment></p>`).innerHTML).toBe("<p>See ☒</p>");
   });
 });
 

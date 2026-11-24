@@ -51,7 +51,7 @@ const listed = async (session: Session) => ((await (await api("/api/sidebar", { 
 /** Waits for the Workspace to deliver every revocation it queued, which the rooms have finished with by then. */
 const delivered = () => vi.waitFor(async () => expect(await workspaceSql("SELECT count(*) AS n FROM pending_revocations")).toEqual([{ n: 0 }]), { timeout: 5_000 });
 
-const countIn = async (roomId: RoomId, table: "messages" | "boosts" | "message_deletions" | "blobs") =>
+const countIn = async (roomId: RoomId, table: "messages" | "boosts" | "message_deletions" | "blobs" | "scheduled_messages") =>
   ((await roomSql(roomId, `SELECT count(*) AS n FROM ${table} WHERE room_id = ?`, roomId)) as Array<{ n: number }>)[0]!.n;
 
 /** Posts a message as `client` and deletes it. */
@@ -109,7 +109,7 @@ describe("Delete a room", () => {
     await delivered();
   });
 
-  it("deletes the room's messages, their reactions, the deletions it kept for reconnecting tabs and its files' records, and no other room's", async () => {
+  it("deletes the room's messages, their reactions, the deletions it kept for reconnecting tabs, its files' records and what's scheduled there, and no other room's", async () => {
     const ada = await signIn("Ada");
     const [room, annex] = [await createRoom("Design", { as: ada }), await createRoom("Annex", { as: ada })];
     for (const { id } of [room, annex]) await upload(ada, id, "moon.jpg", recordedImage("moon-thumb.jpg"));
@@ -118,9 +118,13 @@ describe("Delete a room", () => {
     inRoom.send({ type: "boost.create", messageId: message.id, content: "👍" });
     await inRoom.next("boost.created");
     await deletePosted(inRoom, "Me too");
+    inRoom.send({ type: "message.schedule", clientMessageId: "later", body: "Never sent", sendAt: new Date(Date.now() + 60_000).toISOString() });
+    await inRoom.next("scheduled");
     const inAnnex = await connect(annex.id, ada);
     await post(inAnnex, "Staying");
     await deletePosted(inAnnex, "Not staying");
+    inAnnex.send({ type: "message.schedule", clientMessageId: "later", body: "Still to send", sendAt: new Date(Date.now() + 60_000).toISOString() });
+    await inAnnex.next("scheduled");
     const closed = closeOf(inRoom.ws);
 
     expect((await remove(room.id, ada)).status).toBe(204);
@@ -129,6 +133,8 @@ describe("Delete a room", () => {
     expect(await countIn(room.id, "messages")).toBe(0);
     expect(await countIn(room.id, "boosts")).toBe(0);
     expect(await countIn(room.id, "message_deletions")).toBe(0);
+    expect(await countIn(room.id, "scheduled_messages")).toBe(0);
+    expect(await countIn(annex.id, "scheduled_messages")).toBe(1);
     // Its files' records go once R2 has deleted the files (purge.test.ts).
     await vi.waitFor(async () => expect(await countIn(room.id, "blobs")).toBe(0), { timeout: 5_000 });
     // Its file's message, and "Staying".

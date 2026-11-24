@@ -1,14 +1,12 @@
 import {
-  hasWords,
   isSearchable,
   MAX_SEARCH_LENGTH,
   normalizedSearch,
   parseSearch,
-  sanitizeSearch,
   SEARCH_TOO_LONG,
   searchKey,
   searchOfQuery,
-  searchTerms,
+  searchWords,
   type Message,
   type Search,
   type SearchMatch,
@@ -83,12 +81,13 @@ async function find(env: Env, search: Search, sort: SearchSort, cursor: number |
   return { search, matches, next, rooms: searcher.rooms.filter(({ id }) => found.has(id)) };
 }
 
-/** What the index is asked for `search`: its words as FTS5's, the rooms it looks in, and its filters, with the searcher's DMs for "Includes me". */
+/** What the index is asked for `search`: its words, the rooms it looks in, whose search it is, and its filters, with the searcher's DMs for "Includes me". */
 function indexSearchOf(search: Search, sort: SearchSort, cursor: number | null, { userId, rooms }: Searcher): IndexSearch {
   const directIds = rooms.flatMap(({ id, kind }) => (kind === "direct" ? [id] : []));
   return {
-    terms: hasWords(search.q) ? searchTerms(sanitizeSearch(search.q)) : "",
+    words: searchWords(search.q),
     roomIds: rooms.flatMap(({ id }) => (search.in === undefined || id === search.in ? [id] : [])),
+    searcherId: userId,
     ...(search.from !== undefined && { creatorId: search.from }),
     ...(search.withMe && { includes: { userId, directIds } }),
     ...(search.hasLink && { hasLink: true }),
@@ -105,7 +104,7 @@ function indexSearchOf(search: Search, sort: SearchSort, cursor: number | null, 
  * sent it, as a match does. A hit the index has no message for, from before it kept them or too big to
  * keep, is read from its room as it is now, and left out if its room no longer has it.
  */
-async function matchesOf(env: Env, hits: SearchHit[]): Promise<SearchMatch[]> {
+export async function matchesOf(env: Env, hits: SearchHit[]): Promise<SearchMatch[]> {
   const kept = hits.flatMap(({ message }) => message ?? []);
   const [indexed, read] = await Promise.all([indexedMessages(kept, env.SESSION_SECRET), readNow(env, hits.filter(({ message }) => message === null))]);
   const found = new Map<string, Message>([...indexed, ...read].map((message) => [message.id, message]));

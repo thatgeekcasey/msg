@@ -1,21 +1,32 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type Ref } from "react";
 import { MAX_ROOM_NAME_LENGTH, type RoomIconName, type User, type UserId } from "@ember/protocol";
 import { FIELD_INPUT, Field, SubmitButton } from "@/components/field";
-import { CheckCircle, Community } from "@/components/icons/iconoir";
+import { AtSign, CheckCircle, Community, Headset } from "@/components/icons/iconoir";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { IconPicker } from "./icon-picker";
 import { ListRow, ListSeparator } from "./list-row";
+import { SectionField, type SectionFieldProps } from "./section-field";
 import { AvatarLink } from "./user-avatar";
 
-// The room forms, which New room and a room's settings share: the room's name and icon, who it's for,
-// and Save.
+// The room forms, which New room and a room's settings share: the room's name, icon and sidebar section,
+// who it's for, and Save. A room's settings have whether huddles are allowed in it too, where huddles are on,
+// and whether @channel, @here and @everyone notify it.
 
 /** How many people a form lists before it gets a filter. */
 const FILTER_ABOVE = 20;
 /** How long the filter waits for typing to stop, as Campfire's filter_controller.js does. */
 const FILTER_DELAY_MS = 300;
+
+/** What the Huddles row says of a room whose settings allow huddles in it, and of one whose settings don't. */
+export const HUDDLES_ALLOWED = "Members can start and join huddles in this room.";
+export const HUDDLES_NOT_ALLOWED = "Members can't start or join huddles in this room.";
+/** What it adds for whoever is turning them off while a huddle goes on there. */
+export const HUDDLE_ENDS = "Saving ends the huddle that's going on.";
+/** What the Room-wide mentions row says of a room whose settings let them notify it, and of one whose settings don't. */
+export const CHANNEL_MENTIONS_ALLOWED = "@channel, @here and @everyone notify the people in this room.";
+export const CHANNEL_MENTIONS_NOT_ALLOWED = "@channel, @here and @everyone notify nobody in this room.";
 
 interface Props<Person extends User> {
   /** Whether this person can change the room. Others see its name as a heading, and no Save. */
@@ -25,19 +36,50 @@ interface Props<Person extends User> {
   /** The room's icon, or null for `#`, which only whoever can change the room sees, to pick another. */
   icon: RoomIconName | null;
   onIconChange: (icon: RoomIconName | null) => void;
+  /**
+   * The room's sidebar section, which only whoever can change the room sees, to pick another, while
+   * there are sections to pick or they can make one.
+   */
+  section?: Omit<SectionFieldProps, "disabled">;
   /** The Everyone row, on for a room open to everyone, with a switch if `onFlip` is given; null for none. */
   everyone: { on: boolean; onFlip?: () => void } | null;
   /** The people listed, by name, in groups a line divides, such as a private room's members and everyone else. */
   groups: Person[][];
   /** What follows someone's name: a check mark, a switch, or nothing. */
   mark: (person: Person) => ReactNode;
+  /**
+   * The Huddles row, which says whether the room's settings allow huddles in it, with a switch if
+   * `onChange` is given, and that turning them off ends the room's huddle while `live` says one is going
+   * on; none without it.
+   */
+  huddles?: { allowed: boolean; onChange?: (allowed: boolean) => void; live?: boolean } | null;
+  /**
+   * The Room-wide mentions row, which says whether the room's settings let @channel, @here and @everyone
+   * notify it, with a switch if `onChange` is given; none without it.
+   */
+  channelMentions?: { allowed: boolean; onChange?: (allowed: boolean) => void } | null;
   saving: boolean;
   onSave: () => void;
   /** The form, which the unsaved-changes guard checks before saving from its dialog. */
   ref?: Ref<HTMLFormElement>;
 }
 
-export function RoomForm<Person extends User>({ canAdminister, name, onNameChange, icon, onIconChange, everyone, groups, mark, saving, onSave, ref }: Props<Person>) {
+export function RoomForm<Person extends User>({
+  canAdminister,
+  name,
+  onNameChange,
+  icon,
+  onIconChange,
+  section,
+  everyone,
+  groups,
+  mark,
+  huddles,
+  channelMentions,
+  saving,
+  onSave,
+  ref,
+}: Props<Person>) {
   const save = (event: FormEvent) => {
     event.preventDefault();
     onSave();
@@ -64,10 +106,24 @@ export function RoomForm<Person extends User>({ canAdminister, name, onNameChang
 
       {canAdminister && <IconPicker icon={icon} onChange={onIconChange} disabled={saving} />}
 
+      {canAdminister && section && (section.sections.length > 0 || section.canMake) && <SectionField {...section} disabled={saving} />}
+
       {/* Saving sends who the switches showed when Save was pressed, so they wait until it's done. */}
       <fieldset disabled={saving} className="my-4 min-w-0 rounded-[10px] border bg-surface px-[1ch]">
         <People everyone={everyone} groups={groups} mark={mark} />
       </fieldset>
+
+      {huddles && (
+        <fieldset disabled={saving} className="my-4 min-w-0 rounded-[10px] border bg-surface px-[1ch]">
+          <Huddles {...huddles} />
+        </fieldset>
+      )}
+
+      {channelMentions && (
+        <fieldset disabled={saving} className="my-4 min-w-0 rounded-[10px] border bg-surface px-[1ch]">
+          <ChannelMentions {...channelMentions} />
+        </fieldset>
+      )}
 
       {canAdminister && <SubmitButton disabled={saving}>Save</SubmitButton>}
     </form>
@@ -111,6 +167,45 @@ function People<Person extends User>({ everyone, groups, mark }: Pick<Props<Pers
         </Fragment>
       ))}
     </menu>
+  );
+}
+
+/** The Huddles row, and under it what the room's settings let its members do, which describes its switch. */
+function Huddles({ allowed, onChange, live }: NonNullable<Props<User>["huddles"]>) {
+  return (
+    <>
+      <menu className="m-0 px-[1ch] pt-4">
+        <ListRow figure={<Headset className="size-[4ch] shrink-0" />} name="Huddles">
+          {onChange && <Switch checked={allowed} onCheckedChange={onChange} aria-label="Allow huddles in this room" aria-describedby="room_huddles_note" />}
+        </ListRow>
+      </menu>
+      <p id="room_huddles_note" className="px-[1ch] pt-2 pb-4 text-[0.8em] text-muted-foreground max-md:text-[12px]">
+        {allowed ? HUDDLES_ALLOWED : live ? `${HUDDLES_NOT_ALLOWED} ${HUDDLE_ENDS}` : HUDDLES_NOT_ALLOWED}
+      </p>
+    </>
+  );
+}
+
+/** The Room-wide mentions row, and under it whom they notify there, which describes its switch. */
+function ChannelMentions({ allowed, onChange }: NonNullable<Props<User>["channelMentions"]>) {
+  return (
+    <>
+      <menu className="m-0 px-[1ch] pt-4">
+        <ListRow figure={<AtSign className="size-[4ch] shrink-0" />} name="Room-wide mentions">
+          {onChange && (
+            <Switch
+              checked={allowed}
+              onCheckedChange={onChange}
+              aria-label="Allow @channel, @here and @everyone in this room"
+              aria-describedby="room_channel_mentions_note"
+            />
+          )}
+        </ListRow>
+      </menu>
+      <p id="room_channel_mentions_note" className="px-[1ch] pt-2 pb-4 text-[0.8em] text-muted-foreground max-md:text-[12px]">
+        {allowed ? CHANNEL_MENTIONS_ALLOWED : CHANNEL_MENTIONS_NOT_ALLOWED}
+      </p>
+    </>
   );
 }
 

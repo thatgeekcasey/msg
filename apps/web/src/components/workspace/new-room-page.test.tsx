@@ -1,5 +1,5 @@
-import type { Room } from "@ember/protocol";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import type { Me, Room, SectionOption } from "@ember/protocol";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FlashProvider } from "@/components/flash";
@@ -8,7 +8,7 @@ import { leave, navigate, useRoute } from "@/hooks/use-route";
 import { ApiError } from "@/lib/api";
 import { NewRoomPage } from "./new-room-page";
 
-const ada = { id: "u1", name: "Ada Lovelace" };
+const ada = { id: "u1", name: "Ada Lovelace", administrator: false };
 const grace = { id: "u2", name: "Grace Hopper" };
 const linus = { id: "u3", name: "Linus Torvalds" };
 
@@ -17,7 +17,7 @@ function serve({ created, refusal, formRefusal }: { created?: Room; refusal?: { 
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (init?.method === "POST") return refusal ? Response.json({ error: refusal.error }, { status: refusal.status }) : Response.json({ room: created }, { status: 201 });
     expect(input).toBe("/api/rooms/new");
-    return formRefusal ? Response.json({ error: formRefusal.error }, { status: formRefusal.status }) : Response.json({ people: [ada, grace, linus] });
+    return formRefusal ? Response.json({ error: formRefusal.error }, { status: formRefusal.status }) : Response.json({ people: [ada, grace, linus], sections: [] });
   });
 }
 
@@ -25,24 +25,24 @@ function serve({ created, refusal, formRefusal }: { created?: Room; refusal?: { 
 function holdCreation() {
   let answer = (_: Response) => {};
   vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) =>
-    init?.method === "POST" ? new Promise((resolve) => (answer = resolve)) : Promise.resolve(Response.json({ people: [ada, grace, linus] })),
+    init?.method === "POST" ? new Promise((resolve) => (answer = resolve)) : Promise.resolve(Response.json({ people: [ada, grace, linus], sections: [] })),
   );
   return (response: Response) => act(async () => answer(response));
 }
 
-/** The page, at the form its address names, as the workspace shows it. */
-function NewRoomRoute(props: { onCreated: (room: Room) => void; onFailed: (error: unknown) => void }) {
+/** The page, at the form its address names, as the workspace shows it to `me`. */
+function NewRoomRoute(props: { me: Me; onCreated: (room: Room) => void; onFailed: (error: unknown) => void }) {
   const route = useRoute();
-  return route.page === "new-room" ? <NewRoomPage access={route.access} me={ada} {...props} /> : null;
+  return route.page === "new-room" ? <NewRoomPage access={route.access} {...props} /> : null;
 }
 
-function showPage(path = "/rooms/opens/new") {
+function showPage(path = "/rooms/opens/new", me: Me = ada) {
   const [onCreated, onFailed] = [vi.fn(), vi.fn()];
   history.replaceState(null, "", path);
   render(
     <FlashProvider workspace>
       <Sheet>
-        <NewRoomRoute onCreated={onCreated} onFailed={onFailed} />
+        <NewRoomRoute me={me} onCreated={onCreated} onFailed={onFailed} />
       </Sheet>
     </FlashProvider>,
   );
@@ -101,7 +101,7 @@ describe("Create an open room", () => {
     const created = { id: "design", name: "New room", kind: "open", icon: "rocket" } satisfies Room;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       if (String(input).endsWith("catalog.json")) return Response.json({ icons: [ROCKET], roomOrder: ["rocket"], navigationOrder: ["rocket"] });
-      return init?.method === "POST" ? Response.json({ room: created }, { status: 201 }) : Response.json({ people: [ada, grace, linus] });
+      return init?.method === "POST" ? Response.json({ room: created }, { status: 201 }) : Response.json({ people: [ada, grace, linus], sections: [] });
     });
     const { onCreated, user } = showPage();
     expect(await screen.findByRole("button", { name: "Choose room icon" })).toHaveTextContent("Default hashtag");
@@ -252,6 +252,88 @@ describe("Create a private room", () => {
     expect(location.pathname).toBe("/rooms/opens/new");
     await user.click(screen.getByRole("switch", { name: "Give only some access to this room" }));
     expect(screen.getByRole("switch", { name: `Give ${grace.name} access to this room` })).toBeChecked();
+  });
+});
+
+describe("Sidebar section", () => {
+  const sections: SectionOption[] = [
+    { id: "s1", name: "Engineering", rooms: 2 },
+    { id: "s2", name: "Sales", rooms: 1 },
+  ];
+  const created: Room = { id: "r9", name: "New room", kind: "open", icon: null };
+  /** Answers the form with `listed` sections, and the room made. */
+  const serveSections = (listed = sections) =>
+    vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_input, init) =>
+        init?.method === "POST" ? Response.json({ room: created }, { status: 201 }) : Response.json({ people: [ada, grace, linus], sections: listed }),
+      );
+  const field = () => screen.getByRole("button", { name: "Sidebar section" });
+  const NOTE = "Everyone’s sidebar lists this room under the section’s name.";
+
+  it("puts the room in no section unless one is picked, saying how many of your rooms each has", async () => {
+    serveSections();
+    const { user } = showPage();
+    await roomName();
+    expect(field()).toHaveTextContent("No section");
+    expect(field()).toHaveAccessibleDescription(NOTE);
+    await user.click(field());
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["No section", "Engineering2 rooms", "Sales1 room"]);
+    expect(screen.getByRole("menuitemradio", { name: "No section" })).toHaveAttribute("aria-checked", "true");
+    // Only administrators make sections.
+    expect(screen.queryByRole("menuitem", { name: "New section…" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitemradio", { name: /^Sales/ }));
+    expect(field()).toHaveTextContent("Sales");
+    // A section picked is something to ask about before leaving.
+    act(() => navigate("/rooms/general"));
+    expect(asking()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(posted()).toEqual({ kind: "open", name: "New room", icon: "", section: "s2" }));
+  });
+
+  it("lets an administrator make a section by its name as the room is made", async () => {
+    serveSections();
+    const { user } = showPage("/rooms/opens/new", { ...ada, administrator: true });
+    await roomName();
+    await user.click(field());
+    await user.click(screen.getByRole("menuitem", { name: "New section…" }));
+    const name = screen.getByRole("textbox", { name: "New section’s name" });
+    expect(name).toHaveFocus();
+    expect(name).toBeRequired();
+    expect(name).toHaveAttribute("placeholder", "Such as Software engineering");
+    expect(field()).toHaveTextContent("New section");
+    await user.type(name, "Design");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(posted()).toEqual({ kind: "open", name: "New room", icon: "", section: { name: "Design" } }));
+  });
+
+  it("puts the name away once a section's picked instead", async () => {
+    serveSections();
+    const { user } = showPage("/rooms/opens/new", { ...ada, administrator: true });
+    await roomName();
+    await user.click(field());
+    await user.click(screen.getByRole("menuitem", { name: "New section…" }));
+    await user.click(field());
+    await user.click(screen.getByRole("menuitemradio", { name: /^Engineering/ }));
+    expect(screen.queryByRole("textbox", { name: "New section’s name" })).not.toBeInTheDocument();
+    expect(field()).toHaveTextContent("Engineering");
+  });
+
+  it("isn't there while there are no sections, but for an administrator, who can make one", async () => {
+    serveSections([]);
+    showPage();
+    await roomName();
+    expect(screen.queryByRole("button", { name: "Sidebar section" })).not.toBeInTheDocument();
+    cleanup();
+
+    serveSections([]);
+    const { user } = showPage("/rooms/opens/new", { ...ada, administrator: true });
+    await roomName();
+    await user.click(field());
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["No section"]);
+    expect(screen.getByRole("menuitem", { name: "New section…" })).toBeInTheDocument();
   });
 });
 

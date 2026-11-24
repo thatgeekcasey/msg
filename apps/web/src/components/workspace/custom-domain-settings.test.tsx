@@ -23,7 +23,7 @@ vi.mock("@/lib/page", () => ({ loadPage: vi.fn() }));
 /** The test environment's jsdom, whose address the section reads as the page's. */
 declare const jsdom: { reconfigure(options: { url: string }): void };
 
-const EMBER: Account = { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false };
+const EMBER: Account = { name: "Ember", tagline: "", hideTranslationButtons: true, customStyles: "", restrictRoomCreation: false, restrictChannelMentions: false, restrictEveryoneMention: false, warnBeforeNotifying: true, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, ssoJoin: false, ssoSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false, huddleCameras: true, huddleScreens: true, huddleVideo: "hd" };
 
 /** Where a deploy puts Ember in most of these tests, which names its Worker. */
 const DEPLOYED = "ember-production.nyllon.workers.dev";

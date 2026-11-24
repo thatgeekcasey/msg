@@ -1,3 +1,4 @@
+import { MENTION_CONTENT_TYPE, specialMentionOf } from "@ember/richtext";
 import { trimmed } from "../trim";
 import { EMOJI, TONED } from "./emoji-names";
 
@@ -5,8 +6,9 @@ import { EMOJI, TONED } from "./emoji-names";
 // incoming webhook is sent, read into the rich text a message keeps: paragraphs and line breaks, `>` quotes,
 // code blocks between ``` fences, `code`, *bold*, _italics_ and ~strike-through~, links, mentions and dates in
 // angle brackets, and emoji by name. As in Slack, `&amp;`, `&lt;` and `&gt;` are the only escapes, and
-// formatting needs a word's edge, so `node_cpu_seconds_total` keeps its underscores. Mentions show as text and
-// notify nobody, since Slack's ids name no one here.
+// formatting needs a word's edge, so `node_cpu_seconds_total` keeps its underscores. Mentions of people and
+// channels show as text and notify nobody, since Slack's ids name no one here. So do `<!here>`, `<!channel>`
+// and `<!everyone>`, but in a bot's own text, where they're the room's special mentions, as in Slack.
 
 /**
  * How much of mrkdwn a text gets: all of it, or only its links, mentions, dates, emoji and escapes, as Slack
@@ -46,11 +48,14 @@ const EMPHASES = new Map([
 const WORD = /[\p{L}\p{N}]/u;
 const SPACE = /\s/;
 
-/** `text` as markup, formatted as `formatting` says, or "" when it shows nothing. */
-export function mrkdwnHtml(text: string, formatting: Formatting = "mrkdwn"): string {
+/**
+ * `text` as markup, formatted as `formatting` says, or "" when it shows nothing. With `notifying`, its
+ * `<!here>`, `<!channel>` and `<!everyone>` outside code are the special mentions that can notify the room.
+ */
+export function mrkdwnHtml(text: string, formatting: Formatting = "mrkdwn", notifying = false): string {
   const lines = text.replace(/\r\n?/g, "\n");
   const blocks: Block[] = formatting === "plain" ? [{ tag: "p", lines: lines.split("\n") }] : blocksOf(lines);
-  return blocks.map((block) => blockHtml(block, formatting)).join("");
+  return blocks.map((block) => blockHtml(block, formatting, notifying)).join("");
 }
 
 /** `text` as a line of markup, its line breaks `<br>`, formatted as `formatting` says but without quotes or code blocks. */
@@ -168,15 +173,15 @@ function lineBlocksOf(lines: string[]): Block[] {
   return blocks;
 }
 
-function blockHtml(block: Block, formatting: Formatting): string {
+function blockHtml(block: Block, formatting: Formatting, notifying: boolean): string {
   if (block.tag === "pre") return `<pre>${atomsHtml(atomsOf(block.text, "code"))}</pre>`;
   if (block.tag === "rest") {
-    const html = block.blocks.map((quoted) => blockHtml(quoted, formatting)).join("");
+    const html = block.blocks.map((quoted) => blockHtml(quoted, formatting, notifying)).join("");
     return html && `<blockquote>${html}</blockquote>`;
   }
   const lines = withoutBlankEnds(block.lines);
   if (lines.length === 0) return "";
-  const html = lines.map((line) => lineHtml(line, formatting)).join("<br>");
+  const html = lines.map((line) => lineHtml(line, formatting, notifying)).join("<br>");
   return block.tag === "p" ? `<p>${html}</p>` : `<blockquote><p>${html}</p></blockquote>`;
 }
 
@@ -188,17 +193,17 @@ function withoutBlankEnds(lines: string[]): string[] {
   return lines.slice(start, end + 1);
 }
 
-/** A line as markup, emphasized where `formatting` says to. */
-function lineHtml(line: string, formatting: Formatting): string {
-  const atoms = atomsOf(line, formatting);
+/** A line as markup, emphasized where `formatting` says to, with special mentions that notify if it's `notifying`. */
+function lineHtml(line: string, formatting: Formatting, notifying = false): string {
+  const atoms = atomsOf(line, formatting, notifying);
   return formatting === "mrkdwn" ? emphasized(atoms) : atomsHtml(atoms);
 }
 
 /** The atoms of `text`, read as `mode` says, or, as `emoji`, with only emoji by name, as `plain_text` is. */
-function atomsOf(text: string, mode: Mode | "emoji"): Atom[] {
+function atomsOf(text: string, mode: Mode | "emoji", notifying = false): Atom[] {
   const atoms: Atom[] = [];
   for (let at = 0; at < text.length; ) {
-    const [length, atom] = atomAt(text, at, mode);
+    const [length, atom] = atomAt(text, at, mode, notifying);
     atoms.push(atom);
     at += length;
   }
@@ -206,12 +211,12 @@ function atomsOf(text: string, mode: Mode | "emoji"): Atom[] {
 }
 
 /** The atom at `at` in `text`, with how much of it it takes. */
-function atomAt(text: string, at: number, mode: Mode | "emoji"): [number, Atom] {
+function atomAt(text: string, at: number, mode: Mode | "emoji", notifying: boolean): [number, Atom] {
   if (mode !== "emoji") {
     const code = mode === "mrkdwn" ? matchAt(CODE, text, at) : null;
     if (code) return [code[0].length, { html: `<code>${atomsHtml(atomsOf(code[1]!, "code"))}</code>` }];
     const special = matchAt(SPECIAL, text, at);
-    if (special) return [special[0].length, { html: specialHtml(special[1]!, mode) }];
+    if (special) return [special[0].length, { html: specialHtml(special[1]!, mode, notifying) }];
     const escape = matchAt(ESCAPE, text, at);
     if (escape) return [escape[0].length, UNESCAPED[escape[1]!]!];
   }
@@ -253,12 +258,12 @@ const unescaped = (text: string) => text.replace(/&(amp|lt|gt);/g, (_, name: str
  * What Slack writes between angle brackets: a link, `<https://…|label>` or `<mailto:…>`; a mention of someone,
  * `<@U…>`, or a channel, `<#C…|name>`; or a command, `<!here>`, `<!subteam^S…|@handle>` or `<!date^…|fallback>`.
  */
-function specialHtml(inside: string, mode: Mode): string {
+function specialHtml(inside: string, mode: Mode, notifying: boolean): string {
   const bar = inside.indexOf("|");
   const target = bar < 0 ? inside : inside.slice(0, bar);
   const label = bar < 0 ? "" : inside.slice(bar + 1);
   if (target.startsWith("@") || target.startsWith("#")) return escapeText(target[0] + unescaped(label || target.slice(1)));
-  if (target.startsWith("!")) return commandHtml(target.slice(1).split("^"), label);
+  if (target.startsWith("!")) return commandHtml(target.slice(1).split("^"), label, notifying);
   const address = unescaped(target);
   const href = linkHref(address);
   const shown = label === "" ? escapeText(address.replace(/^mailto:/i, "")) : labelHtml(label, mode);
@@ -271,8 +276,11 @@ function labelHtml(label: string, mode: Mode): string {
   return mode === "mrkdwn" ? emphasized(atoms) : atomsHtml(atoms);
 }
 
-/** A command: a date as its fallback text, linked if it gives a link, and the rest as Slack shows them, as text. */
-function commandHtml([name, ...args]: string[], label: string): string {
+/**
+ * A command: a date as its fallback text, linked if it gives a link, `<!here>` and its kin as the special
+ * mentions they are where they're `notifying`, and the rest as Slack shows them, as text.
+ */
+function commandHtml([name, ...args]: string[], label: string, notifying: boolean): string {
   if (name === "date") {
     const [seconds, , link] = args;
     const shown = escapeText(label === "" ? utcTime(Number(seconds)) : unescaped(label));
@@ -280,6 +288,8 @@ function commandHtml([name, ...args]: string[], label: string): string {
     return href ? anchor(href, shown) : shown;
   }
   if (name === "subteam") return escapeText(label === "" ? `@${args[0] ?? ""}` : unescaped(label));
+  const mention = notifying && args.length === 0 ? specialMentionOf(name ?? "") : undefined;
+  if (mention) return `<action-text-attachment content-type="${MENTION_CONTENT_TYPE}" sgid="${mention}"></action-text-attachment>`;
   return escapeText(`@${name}`);
 }
 

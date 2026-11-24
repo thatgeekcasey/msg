@@ -53,6 +53,20 @@ describe("Initials avatars", () => {
     expect(result.current.loaded).toBe(true);
   });
 
+  it("has settled once a load has come or failed, though one that failed leaves it unloaded", async () => {
+    const failed = renderHook(() => useDirectory()).result;
+    expect(failed.current.settled).toBe(false);
+    server.down = true;
+    // Rejecting inside act would leave its update unrendered, as act renders only once its callback resolves.
+    await act(() => expect(failed.current.reload()).rejects.toThrow("Failed to fetch"));
+    expect(failed.current).toMatchObject({ loaded: false, settled: true });
+
+    server.down = false;
+    const came = renderHook(() => useDirectory()).result;
+    await reload(came);
+    expect(came.current).toMatchObject({ loaded: true, settled: true });
+  });
+
   it("keeps the people it has while the server says they're current, and takes them again when they change", async () => {
     const { result } = renderHook(() => useDirectory());
     await reload(result);
@@ -107,5 +121,43 @@ describe("Make or revoke administrators", () => {
     Object.assign(server, { users: [ada, { ...grace, role: "member" }], version: 2 });
     await reload(result);
     expect(result.current.people.get("u2")).toEqual(grace);
+  });
+});
+
+describe("AI agents kept to administrators' direct messages", () => {
+  const scout: DirectoryUser = { id: "u3", name: "Scout", bio: null, role: "bot", status: "active", avatarUrl: "/users/u3.ghi/avatar?v=20261115120000", agent: true };
+
+  it("takes out whoever the workspace socket says this person is no longer told of, and takes them back as it says they are", async () => {
+    server.users = [ada, scout];
+    const { result } = renderHook(() => useDirectory());
+    await reload(result);
+    act(() => result.current.remove(scout.id));
+    expect([...result.current.people.keys()]).toEqual(["u1"]);
+    // Someone it never listed is as gone.
+    act(() => result.current.remove("u9"));
+    expect([...result.current.people.keys()]).toEqual(["u1"]);
+
+    act(() => result.current.update({ ...scout, adminsOnly: true }));
+    expect(result.current.people.get("u3")).toEqual({ ...scout, adminsOnly: true });
+  });
+
+  it("leaves out someone taken out while a load is on its way, which may have read them before, whatever came of them first", async () => {
+    server.users = [ada, scout];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.mocked(fetch).mockImplementationOnce(async (input, init) => {
+      await held;
+      return answer(input, init);
+    });
+    const { result } = renderHook(() => useDirectory());
+    let loaded!: Promise<void>;
+    act(() => void (loaded = result.current.reload()));
+    act(() => result.current.update({ ...scout, name: "Scout II" }));
+    act(() => result.current.remove(scout.id));
+    await act(async () => {
+      release();
+      await loaded;
+    });
+    expect([...result.current.people.keys()]).toEqual(["u1"]);
   });
 });

@@ -10,7 +10,7 @@ import { CustomStylesPage } from "./custom-styles-page";
 import { CHANGES_SAVED } from "./settings-page";
 
 const CSS = ".mb-app { --mb-ink: rebeccapurple; }";
-const styled: Account = { name: "Analytical Engines", tagline: "", hideTranslationButtons: true, customStyles: CSS, restrictRoomCreation: false, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false };
+const styled: Account = { name: "Analytical Engines", tagline: "", hideTranslationButtons: true, customStyles: CSS, restrictRoomCreation: false, restrictChannelMentions: false, restrictEveryoneMention: false, warnBeforeNotifying: true, logo: null, customDomain: null, joinLink: true, openSignUp: false, memberfulJoin: false, memberfulSignIn: false, ssoJoin: false, ssoSignIn: false, emailDomainSignUp: false, emailDomains: [], navigationIcons: {}, huddles: false, huddleCameras: true, huddleScreens: true, huddleVideo: "hd" };
 
 /** The icon pickers' catalog: a few icons, with Coffee suggested for a break room. */
 const CATALOG = {
@@ -228,7 +228,7 @@ describe("Navigation icons", () => {
     return pickers();
   };
 
-  it("lists a picker for each of the rail's buttons and appearance modes, under Navigation icons, above Custom CSS", async () => {
+  it("lists a picker for each of the rail's buttons, Pause notifications among them, and appearance modes, under Navigation icons, above Custom CSS", async () => {
     const account: Account = { ...styled, navigationIcons: { home: "coffee", dark: "iconoir:regular:home" } };
     serve({ account });
     showPage(account);
@@ -242,6 +242,7 @@ describe("Navigation icons", () => {
       "Choose Activity icon",
       "Choose Search icon",
       "Choose Admin icon",
+      "Choose Pause notifications icon",
       "Choose Light mode icon",
       "Choose Dark mode icon",
       "Choose System appearance icon",

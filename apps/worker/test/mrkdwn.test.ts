@@ -1,3 +1,4 @@
+import { MENTION_CONTENT_TYPE } from "@ember/richtext";
 import { describe, expect, it } from "vitest";
 import { emojiNamed, mrkdwnHtml, plainTextHtml } from "../src/bots/mrkdwn";
 
@@ -64,6 +65,14 @@ describe("Slack-compatible webhooks", () => {
       expect(mrkdwnHtml("<@U024BE7LH> <@U123|bob> <#C024BE7LR> <#C123|general>")).toBe("<p>@U024BE7LH @bob #C024BE7LR #general</p>");
       expect(mrkdwnHtml("<!here> <!channel> <!everyone> <!here|here>")).toBe("<p>@here @channel @everyone @here</p>");
       expect(mrkdwnHtml("<!subteam^SAZ94GDB8|@ops> <!subteam^SAZ94GDB8>")).toBe("<p>@ops @SAZ94GDB8</p>");
+    });
+
+    it("makes @here and its kin the room's special mentions in text that notifies, with or without a label, but not in code, nor anything else", () => {
+      const mention = (name: string) => `<action-text-attachment content-type="${MENTION_CONTENT_TYPE}" sgid="${name}"></action-text-attachment>`;
+      expect(mrkdwnHtml("<!here> <!channel|channel> *<!everyone>*", "mrkdwn", true)).toBe(`<p>${mention("here")} ${mention("channel")} <strong>${mention("everyone")}</strong></p>`);
+      expect(mrkdwnHtml("<!here> deploy", "plain", true)).toBe(`<p>${mention("here")} deploy</p>`);
+      expect(mrkdwnHtml("`<!here>`\n```<!channel>```", "mrkdwn", true)).toBe("<p><code>@here</code></p><pre>@channel</pre>");
+      expect(mrkdwnHtml("<@U024BE7LH> <!subteam^SAZ94GDB8|@ops> <!here^x> <!group> @here", "mrkdwn", true)).toBe("<p>@U024BE7LH @ops @here @group @here</p>");
     });
 
     it("shows a date as its fallback, linked if it has a link, or in UTC without one", () => {

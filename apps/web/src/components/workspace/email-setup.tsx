@@ -15,6 +15,7 @@ import { Xmark } from "@/components/icons/iconoir";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useMounted } from "@/hooks/use-mounted";
+import { useSecretField } from "@/hooks/use-secret-field";
 import { ApiError, changeAccount, checkSendingDomain, forgetResendApiKey, isSignedOut, saveResendApiKey } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { sendsEmail, TestEmail } from "./email-settings";
@@ -337,6 +338,7 @@ function ResendStep({
 }: Saving & { email: Email; onEmailChanged: (email: Email) => void; onContinue: () => void; onBack: () => void }) {
   const [typed, setTyped] = useState("");
   const [refusal, setRefusal] = useState<string | null>(null);
+  const keyField = useSecretField(typed);
   const mounted = useMounted();
   const hasKey = email.resendKey === "saved";
 
@@ -384,7 +386,7 @@ function ResendStep({
           autoCapitalize="none"
           spellCheck={false}
           placeholder="re_…"
-          value={typed}
+          ref={keyField}
           disabled={saving}
           aria-invalid={refusal !== null}
           aria-describedby={refusal !== null ? "resend-api-key-refusal" : hasKey ? "resend-api-key-description" : undefined}
